@@ -49,6 +49,6 @@
   <Runtimes>CLR;Mono</Runtimes>
 
   <!-- Set when published to PluginHub; unused by a dev folder. -->
-  <Commit></Commit>
+  <Commit>v0.591.0</Commit>
 
 </PluginData>

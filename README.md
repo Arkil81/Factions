@@ -16,6 +16,12 @@ and is projected into it when players are near.
 | `src/Factions.Sim` | Offline simulation and balancing tool (net9) |
 | `tests/Factions.Core.Tests` | Engine tests (xUnit) |
 
+## Installing the client plugin
+
+Factions UI installs through [Pulsar](https://github.com/SpaceGT/Pulsar) straight from this repository;
+the steps are on the [latest release](https://github.com/Arkil81/Factions/releases/latest). Client and
+server must speak the same wire protocol, which each release states.
+
 ## Building
 
 ```
