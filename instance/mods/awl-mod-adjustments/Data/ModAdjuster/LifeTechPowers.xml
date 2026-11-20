@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AWL Mod Adjustments: Life'Tech-Powers (2558149005) rebalanced around deuterium ore (docs/deuterium-fusion.md).
+     Applied by ModAdjusterV2 at LoadData, on the server and every client. ProducedGases and ItemIds REPLACE
+     the whole list, so each is restated in full. A "Loaded definition" line in ModAdjuster's log means the
+     field was written, not that SE uses it: SE builds inventory constraints and the G menu from definitions
+     before ModAdjuster runs, so check the effect in game. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <CubeBlocks>
+    <!-- Vaporizer: 11.52 L per unit of deuterium ore, mined or synthesised (was 24). Inputs and rate stay Life'Tech's own: SE fixes a gas generator's accepted items before ModAdjuster runs, and one ratio applies to every input. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>LG_DeuteriumVaporizer</SubtypeId>
+      </Id>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Deuterium</SubtypeId>
+            </Id>
+            <IceToGasRatio>11.52</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Processor: no deuterium from ice (was 6 L per ice). Public=false hides it from the G menu, which SE checks each time the screen opens; placed blocks keep working. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>LG_DeuteriumProcessor</SubtypeId>
+      </Id>
+      <Public>false</Public>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Oxygen</SubtypeId>
+            </Id>
+            <IceToGasRatio>8</IceToGasRatio>
+          </GasInfo>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Hydrogen</SubtypeId>
+            </Id>
+            <IceToGasRatio>16</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Separator: a token 0.01 L H2 per stone (was 5 L D2 + 10 L H2 from any rock). Its stone input cannot be removed; 0 would divide by zero in SE's consumption. Public=false hides it. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>LG_DeuteriumSeparator</SubtypeId>
+      </Id>
+      <Public>false</Public>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Hydrogen</SubtypeId>
+            </Id>
+            <IceToGasRatio>0.01</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Vaporizer: 11.52 L per unit of deuterium ore, mined or synthesised (was 24). Inputs and rate stay Life'Tech's own: SE fixes a gas generator's accepted items before ModAdjuster runs, and one ratio applies to every input. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>SG_DeuteriumVaporizer</SubtypeId>
+      </Id>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Deuterium</SubtypeId>
+            </Id>
+            <IceToGasRatio>11.52</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Processor: no deuterium from ice (was 6 L per ice). Public=false hides it from the G menu, which SE checks each time the screen opens; placed blocks keep working. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>SG_DeuteriumProcessor</SubtypeId>
+      </Id>
+      <Public>false</Public>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Oxygen</SubtypeId>
+            </Id>
+            <IceToGasRatio>5</IceToGasRatio>
+          </GasInfo>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Hydrogen</SubtypeId>
+            </Id>
+            <IceToGasRatio>10</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Separator: a token 0.01 L H2 per stone (was 5 L D2 + 10 L H2 from any rock). Its stone input cannot be removed; 0 would divide by zero in SE's consumption. Public=false hides it. -->
+    <Definition xsi:type="MyObjectBuilder_OxygenGeneratorDefinition">
+      <Id>
+        <TypeId>OxygenGenerator</TypeId>
+        <SubtypeId>SG_DeuteriumSeparator</SubtypeId>
+      </Id>
+      <Public>false</Public>
+      <ProducedGases>
+          <GasInfo>
+            <Id>
+              <TypeId>GasProperties</TypeId>
+              <SubtypeId>Hydrogen</SubtypeId>
+            </Id>
+            <IceToGasRatio>0.01</IceToGasRatio>
+          </GasInfo>
+      </ProducedGases>
+    </Definition>
+    <!-- Output as shipped (the fuel chain is the cap); 5 MW*s per litre, as every fusion reactor now. -->
+    <Definition xsi:type="MyObjectBuilder_HydrogenEngineDefinition">
+      <Id>
+        <TypeId>HydrogenEngine</TypeId>
+        <SubtypeId>LG_Small_FusionReaktor_MTF</SubtypeId>
+      </Id>
+      <!-- Prototech parts before the critical Display: the reactor runs only once they are in. Life'Tech's own list otherwise unchanged. -->
+      <Components>
+        <Component Subtype="SteelPlate" Count="120" />
+        <Component Subtype="Construction" Count="40" />
+        <Component Subtype="MetalGrid" Count="25" />
+        <Component Subtype="SmallTube" Count="18" />
+        <Component Subtype="LargeTube" Count="35" />
+        <Component Subtype="Motor" Count="12" />
+        <Component Subtype="Detector" Count="20" />
+        <Component Subtype="Computer" Count="100" />
+        <Component Subtype="Superconductor" Count="55" />
+        <Component Subtype="PrototechPanel" Count="15" />
+        <Component Subtype="PrototechCapacitor" Count="2" />
+        <Component Subtype="PrototechCoolingUnit" Count="4" />
+        <Component Subtype="Display" Count="5" />
+        <Component Subtype="SteelPlate" Count="30" />
+      </Components>
+      <FuelProductionToCapacityMultiplier>5</FuelProductionToCapacityMultiplier>
+    </Definition>
+    <!-- Output as shipped (the fuel chain is the cap); 5 MW*s per litre, as every fusion reactor now. -->
+    <Definition xsi:type="MyObjectBuilder_HydrogenEngineDefinition">
+      <Id>
+        <TypeId>HydrogenEngine</TypeId>
+        <SubtypeId>LG_Large_FusionReactor_Tokamak</SubtypeId>
+      </Id>
+      <!-- Prototech parts before the critical Display: the reactor runs only once they are in. Life'Tech's own list otherwise unchanged. -->
+      <Components>
+        <Component Subtype="SteelPlate" Count="500" />
+        <Component Subtype="Construction" Count="80" />
+        <Component Subtype="MetalGrid" Count="40" />
+        <Component Subtype="SmallTube" Count="45" />
+        <Component Subtype="LargeTube" Count="15" />
+        <Component Subtype="Motor" Count="50" />
+        <Component Subtype="Detector" Count="18" />
+        <Component Subtype="GravityGenerator" Count="32" />
+        <Component Subtype="Reactor" Count="80" />
+        <Component Subtype="PowerCell" Count="22" />
+        <Component Subtype="Computer" Count="180" />
+        <Component Subtype="PlatinumPlatedPlate" Count="60" />
+        <Component Subtype="Superconductor" Count="75" />
+        <Component Subtype="PrototechFrame" Count="1" />
+        <Component Subtype="PrototechPanel" Count="200" />
+        <Component Subtype="PrototechCapacitor" Count="10" />
+        <Component Subtype="PrototechCoolingUnit" Count="30" />
+        <Component Subtype="Display" Count="16" />
+        <Component Subtype="SteelPlate" Count="100" />
+      </Components>
+      <FuelProductionToCapacityMultiplier>5</FuelProductionToCapacityMultiplier>
+    </Definition>
+    <!-- Output as shipped (the fuel chain is the cap); 5 MW*s per litre, as every fusion reactor now. -->
+    <Definition xsi:type="MyObjectBuilder_HydrogenEngineDefinition">
+      <Id>
+        <TypeId>HydrogenEngine</TypeId>
+        <SubtypeId>Medium_Stellarator_Fusion_Reactor</SubtypeId>
+      </Id>
+      <!-- Prototech parts before the critical BulletproofGlass: the reactor runs only once they are in. Life'Tech's own list otherwise unchanged. -->
+      <Components>
+        <Component Subtype="SteelPlate" Count="1000" />
+        <Component Subtype="Construction" Count="120" />
+        <Component Subtype="MetalGrid" Count="60" />
+        <Component Subtype="SmallTube" Count="100" />
+        <Component Subtype="LargeTube" Count="30" />
+        <Component Subtype="Motor" Count="60" />
+        <Component Subtype="Detector" Count="24" />
+        <Component Subtype="GravityGenerator" Count="48" />
+        <Component Subtype="Reactor" Count="120" />
+        <Component Subtype="PowerCell" Count="40" />
+        <Component Subtype="Computer" Count="300" />
+        <Component Subtype="PlatinumPlatedPlate" Count="100" />
+        <Component Subtype="Superconductor" Count="120" />
+        <Component Subtype="Display" Count="16" />
+        <Component Subtype="PrototechFrame" Count="2" />
+        <Component Subtype="PrototechPanel" Count="400" />
+        <Component Subtype="PrototechCapacitor" Count="20" />
+        <Component Subtype="PrototechCoolingUnit" Count="60" />
+        <Component Subtype="BulletproofGlass" Count="10" />
+        <Component Subtype="SteelPlate" Count="200" />
+      </Components>
+      <FuelProductionToCapacityMultiplier>5</FuelProductionToCapacityMultiplier>
+    </Definition>
+    <!-- Output as shipped (the fuel chain is the cap); 5 MW*s per litre, as every fusion reactor now. -->
+    <Definition xsi:type="MyObjectBuilder_HydrogenEngineDefinition">
+      <Id>
+        <TypeId>HydrogenEngine</TypeId>
+        <SubtypeId>SG_Small_FusionReactor</SubtypeId>
+      </Id>
+      <!-- Prototech parts before the critical BulletproofGlass: the reactor runs only once they are in. Life'Tech's own list otherwise unchanged. -->
+      <Components>
+        <Component Subtype="SteelPlate" Count="5" />
+        <Component Subtype="Construction" Count="10" />
+        <Component Subtype="MetalGrid" Count="2" />
+        <Component Subtype="SmallTube" Count="5" />
+        <Component Subtype="LargeTube" Count="1" />
+        <Component Subtype="Motor" Count="3" />
+        <Component Subtype="Detector" Count="2" />
+        <Component Subtype="Computer" Count="8" />
+        <Component Subtype="Display" Count="1" />
+        <Component Subtype="PrototechPanel" Count="2" />
+        <Component Subtype="PrototechCapacitor" Count="1" />
+        <Component Subtype="BulletproofGlass" Count="2" />
+        <Component Subtype="SteelPlate" Count="2" />
+      </Components>
+      <FuelProductionToCapacityMultiplier>5</FuelProductionToCapacityMultiplier>
+    </Definition>
+    <!-- Output as shipped (the fuel chain is the cap); 5 MW*s per litre, as every fusion reactor now. -->
+    <Definition xsi:type="MyObjectBuilder_HydrogenEngineDefinition">
+      <Id>
+        <TypeId>HydrogenEngine</TypeId>
+        <SubtypeId>SG_Large_FusionReactor_MTF</SubtypeId>
+      </Id>
+      <!-- Prototech parts before the critical Display: the reactor runs only once they are in. Life'Tech's own list otherwise unchanged. -->
+      <Components>
+        <Component Subtype="SteelPlate" Count="80" />
+        <Component Subtype="Construction" Count="40" />
+        <Component Subtype="MetalGrid" Count="25" />
+        <Component Subtype="SmallTube" Count="18" />
+        <Component Subtype="LargeTube" Count="35" />
+        <Component Subtype="Motor" Count="12" />
+        <Component Subtype="Detector" Count="20" />
+        <Component Subtype="Computer" Count="100" />
+        <Component Subtype="Superconductor" Count="55" />
+        <Component Subtype="PrototechPanel" Count="15" />
+        <Component Subtype="PrototechCapacitor" Count="2" />
+        <Component Subtype="PrototechCoolingUnit" Count="4" />
+        <Component Subtype="Display" Count="5" />
+        <Component Subtype="SteelPlate" Count="15" />
+      </Components>
+      <FuelProductionToCapacityMultiplier>5</FuelProductionToCapacityMultiplier>
+    </Definition>
+    <!-- 0.21 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (0.042 MW-equivalent, 7 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>SG_Small_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>0.042</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+    <!-- 1.029 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (0.206 MW-equivalent, 33 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>SG_Large_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>0.206</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+    <!-- 9.0421 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (1.808 MW-equivalent, 290 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>LG_Small_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>1.808</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+    <!-- 9.0421 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (1.808 MW-equivalent, 290 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>SG_Huge_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>1.808</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+    <!-- 33.782 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (6.756 MW-equivalent, 1,085 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>LG_Large_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>6.756</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+    <!-- 226.4 MN: burns Deuterium at efficiency 1 (was 3); 3x vanilla H2 thrust per ice, measured through the cell (45.28 MW-equivalent, 7,275 L/s Deuterium at full thrust). -->
+    <Definition xsi:type="MyObjectBuilder_ThrustDefinition">
+      <Id>
+        <TypeId>Thrust</TypeId>
+        <SubtypeId>LG_Huge_FusionEngine</SubtypeId>
+      </Id>
+      <MaxPowerConsumption>45.28</MaxPowerConsumption>
+      <FuelConverter>
+        <FuelId>
+          <TypeId>GasProperties</TypeId>
+          <SubtypeId>Deuterium</SubtypeId>
+        </FuelId>
+        <Efficiency>1</Efficiency>
+      </FuelConverter>
+    </Definition>
+  </CubeBlocks>
+  <CategoryClasses>
+    <!-- Life'Tech's G-menu category, restated without the Processor and Separator (LG/SG). ModAdjuster replaces
+         ItemIds whole. Removing a block from its category alone did not hide it in game (2026-10-13), and
+         GuiVisible=false does not either; Public=false on the block is what the G menu checks.
+         The Processor heads a legacy variant group with the Separator and Vaporizer; check in game that the
+         Vaporizer still shows. -->
+    <Category xsi:type="MyObjectBuilder_GuiBlockCategoryDefinition">
+      <Id>
+        <TypeId>GuiBlockCategoryDefinition</TypeId>
+        <SubtypeId />
+      </Id>
+      <Name>LifeTechPowers</Name>
+      <ItemIds>
+        <string>HydrogenEngine/LG_Fuelcell_T0</string>
+        <string>HydrogenEngine/SG_Fuelcell_T0</string>
+        <string>HydrogenEngine/LG_Fuelcell_T1</string>
+        <string>HydrogenEngine/SG_Fuelcell_T1</string>
+        <string>HydrogenEngine/LG_Fuelcell_T2</string>
+        <string>HydrogenEngine/SG_Fuelcell_T2</string>
+        <string>OxygenGenerator/LG_DeuteriumVaporizer</string>
+        <string>OxygenGenerator/SG_DeuteriumVaporizer</string>
+        <string>OxygenTank/LG_Small_DeuteriumTank</string>
+        <string>OxygenTank/SG_Huge_DeuteriumTank</string>
+        <string>OxygenTank/SG_Small_DeuteriumTank</string>
+        <string>OxygenTank/SG_Large_DeuteriumTank</string>
+        <string>OxygenTank/LG_Large_DeuteriumTank</string>
+        <string>OxygenTank/LG_Huge_DeuteriumTank</string>
+        <string>Thrust/SG_Small_FusionEngine</string>
+        <string>Thrust/LG_Small_FusionEngine</string>
+        <string>Thrust/SG_Large_FusionEngine</string>
+        <string>Thrust/SG_Huge_FusionEngine</string>
+        <string>Thrust/LG_Large_FusionEngine</string>
+        <string>Thrust/LG_Huge_FusionEngine</string>
+        <string>HydrogenEngine/Medium_Stellarator_Fusion_Reactor</string>
+        <string>HydrogenEngine/SG_Small_FusionReactor</string>
+        <string>HydrogenEngine/SG_Large_FusionReactor_MTF</string>
+        <string>HydrogenEngine/LG_Small_FusionReaktor_MTF</string>
+        <string>HydrogenEngine/LG_Large_FusionReactor_Tokamak</string>
+      </ItemIds>
+    </Category>
+  </CategoryClasses>
+</Definitions>

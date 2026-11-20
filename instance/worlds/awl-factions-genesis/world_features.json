@@ -1,0 +1,1697 @@
+{
+  "Features": [
+    {
+      "Name": "Cauldron Ring",
+      "Shape": 1,
+      "Center": {
+        "X": 0.0,
+        "Y": 0.0,
+        "Z": 0.0
+      },
+      "AnchorPlanetId": "72111577199174151",
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 195.0,
+      "OuterRadiusKm": 465.0,
+      "HalfThicknessKm": 1.8,
+      "Density": 0.75,
+      "NodeSeparationKm": 30.0,
+      "Zone": 1,
+      "SpaceRespawn": true,
+      "Bands": [
+        {
+          "InnerRadiusKm": 195.0,
+          "OuterRadiusKm": 208.5,
+          "Density": 1.0,
+          "Materials": [
+            {
+              "SubTypeId": "Platinum",
+              "Share": 1.0,
+              "BandDepthM": 8.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 20.0,
+                "MaxM": 60.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            }
+          ]
+        },
+        {
+          "InnerRadiusKm": 213.9,
+          "OuterRadiusKm": 240.9,
+          "Density": null,
+          "Materials": [
+            {
+              "SubTypeId": "Uranium",
+              "Share": 0.5,
+              "BandDepthM": 8.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 20.0,
+                "MaxM": 55.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Gold",
+              "Share": 0.25,
+              "BandDepthM": 8.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 20.0,
+                "MaxM": 60.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Silver",
+              "Share": 0.25,
+              "BandDepthM": 8.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 20.0,
+                "MaxM": 60.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            }
+          ]
+        },
+        {
+          "InnerRadiusKm": 246.3,
+          "OuterRadiusKm": 271.68,
+          "Density": null,
+          "Materials": [
+            {
+              "SubTypeId": "[CM] Dense Iron (Fe+)",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "[CM] Taenite (Fe,Ni)",
+              "Share": 0.15,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Nickel",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Cobalt",
+              "Share": 0.2,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Silicon",
+              "Share": 0.1,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Magnesium",
+              "Share": 0.05,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            }
+          ]
+        },
+        {
+          "InnerRadiusKm": 280.59000000000003,
+          "OuterRadiusKm": 319.2,
+          "Density": null,
+          "Materials": [
+            {
+              "SubTypeId": "[CM] Dense Iron (Fe+)",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "[CM] Taenite (Fe,Ni)",
+              "Share": 0.15,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Nickel",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Cobalt",
+              "Share": 0.2,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Silicon",
+              "Share": 0.1,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Magnesium",
+              "Share": 0.05,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            }
+          ]
+        },
+        {
+          "InnerRadiusKm": 340.8,
+          "OuterRadiusKm": 362.4,
+          "Density": null,
+          "Materials": [
+            {
+              "SubTypeId": "[CM] Dense Iron (Fe+)",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "[CM] Taenite (Fe,Ni)",
+              "Share": 0.15,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Nickel",
+              "Share": 0.25,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Cobalt",
+              "Share": 0.2,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 90.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Silicon",
+              "Share": 0.1,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            },
+            {
+              "SubTypeId": "Magnesium",
+              "Share": 0.05,
+              "BandDepthM": 10.0,
+              "OverburdenM": 3.0,
+              "SizeRange": {
+                "MinM": 30.0,
+                "MaxM": 85.0
+              },
+              "DepositCountCoefficient": 20.0,
+              "DepositSizeDenominator": 8.0
+            }
+          ]
+        },
+        {
+          "InnerRadiusKm": 388.59000000000003,
+          "OuterRadiusKm": 400.47,
+          "Density": null,
+          "Materials": null
+        },
+        {
+          "InnerRadiusKm": 412.89,
+          "OuterRadiusKm": 426.93,
+          "Density": null,
+          "Materials": null
+        },
+        {
+          "InnerRadiusKm": 448.26,
+          "OuterRadiusKm": 449.61,
+          "Density": null,
+          "Materials": null
+        },
+        {
+          "InnerRadiusKm": 452.31,
+          "OuterRadiusKm": 453.93,
+          "Density": null,
+          "Materials": null
+        }
+      ],
+      "Materials": [
+        {
+          "SubTypeId": "Ice",
+          "Share": 1.0,
+          "BandDepthM": 12.0,
+          "OverburdenM": 2.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Cinder Nest",
+      "Shape": 0,
+      "Center": {
+        "X": -1078.976,
+        "Y": -978.068,
+        "Z": 321.468
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.18,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.1,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Akimotoite (Si,Mg)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Cobalt",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silver",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Gold",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Platinum",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Uranium",
+          "Share": 0.01,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Hollow Nest",
+      "Shape": 0,
+      "Center": {
+        "X": 583.452,
+        "Y": -1175.357,
+        "Z": 473.743
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.18,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.1,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Akimotoite (Si,Mg)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Cobalt",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silver",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Gold",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Platinum",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Uranium",
+          "Share": 0.01,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Ashfall Nest",
+      "Shape": 0,
+      "Center": {
+        "X": 107.231,
+        "Y": -636.099,
+        "Z": -1204.235
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.18,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.1,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Akimotoite (Si,Mg)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Cobalt",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silver",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Gold",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Platinum",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Uranium",
+          "Share": 0.01,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Far Nest Umbra",
+      "Shape": 0,
+      "Center": {
+        "X": 2202.139,
+        "Y": 5033.461,
+        "Z": -3082.995
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.14,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Glaucodot (Fe,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.03,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Sperrylite (Pt)",
+          "Share": 0.06,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Niggliite (Pt)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Petzite (Ag,Au)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Electrum (Au,Ag)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Autunite (U)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Uraniaurite (U,Au)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Carnotite (U)",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Deuterium",
+          "Share": 0.02,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Far Nest Vigil",
+      "Shape": 0,
+      "Center": {
+        "X": 3905.024,
+        "Y": -3464.134,
+        "Z": 3527.118
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.14,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Glaucodot (Fe,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.03,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Sperrylite (Pt)",
+          "Share": 0.06,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Niggliite (Pt)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Petzite (Ag,Au)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Electrum (Au,Ag)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Autunite (U)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Uraniaurite (U,Au)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Carnotite (U)",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Deuterium",
+          "Share": 0.02,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    },
+    {
+      "Name": "Far Nest Threnody",
+      "Shape": 0,
+      "Center": {
+        "X": -2839.974,
+        "Y": 3912.853,
+        "Z": -4039.075
+      },
+      "AnchorPlanetId": null,
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 0.0,
+      "OuterRadiusKm": 750.0,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.2,
+      "NodeSeparationKm": 50.0,
+      "Zone": 0,
+      "Bands": [],
+      "Materials": [
+        {
+          "SubTypeId": "[CM] Kamacite (Fe,Ni,Co)",
+          "Share": 0.14,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 90.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Taenite (Fe,Ni)",
+          "Share": 0.08,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Dense Iron (Fe+)",
+          "Share": 0.06,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Hapkeite (Fe,Si)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Glaucodot (Fe,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[CM] Cohenite (Ni,Co)",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Silicon",
+          "Share": 0.05,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 30.0,
+            "MaxM": 85.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[S] Wadsleyite (Si,Mg)",
+          "Share": 0.04,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 28.0,
+            "MaxM": 80.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Magnesium",
+          "Share": 0.03,
+          "BandDepthM": 10.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 75.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Ice",
+          "Share": 0.12,
+          "BandDepthM": 12.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 25.0,
+            "MaxM": 70.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Sperrylite (Pt)",
+          "Share": 0.06,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Niggliite (Pt)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Petzite (Ag,Au)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[PM] Electrum (Au,Ag)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 60.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Autunite (U)",
+          "Share": 0.05,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Uraniaurite (U,Au)",
+          "Share": 0.04,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "[EI] Carnotite (U)",
+          "Share": 0.03,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        },
+        {
+          "SubTypeId": "Deuterium",
+          "Share": 0.02,
+          "BandDepthM": 8.0,
+          "OverburdenM": 3.0,
+          "SizeRange": {
+            "MinM": 20.0,
+            "MaxM": 55.0
+          },
+          "DepositCountCoefficient": 20.0,
+          "DepositSizeDenominator": 8.0
+        }
+      ]
+    }
+  ]
+}

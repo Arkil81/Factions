@@ -1,0 +1,774 @@
+{
+  "// faction_recipe.json": "The starting estate of every faction in AWL Factions Genesis: which bodies and features each holds, and how many nodes in each. Copy beside tuning.json. Bodies are keyed by GENERATOR SUBTYPE (Tellus, Kor, Agni) and not by display name -- PlanetRecord.Name reads 'Planet' for every body at runtime. Features are keyed by name, which does survive. See docs/issues/FAC-105.",
+  "// Nodes is mandatory": "Every region carries an explicit count, and a region without one is refused. Capacity used to do the budgeting by accident -- at a 500 km separation a 200 km feature held 0.31 nodes, so 'fill the region' was self-limiting. At 50 km the same feature holds ~307. Geometry is no longer the budget; this file is.",
+  "// There is no role field": "'Power base' and 'forward presence' describe the SHAPE of an estate, and the shape is already the node counts -- four nodes on Tellus and two on Kor is a Tellus power base by construction. An enum beside the counts would be a second, weaker statement of the same thing, free to disagree with it. Operator, 2026-08-26.",
+  "// Allocation against capacity": "Forward presence is a SUBSET, not a blanket rule. Live allocation against PlacementCapacity's own numbers: Kor 5/8, Agni 11/21, Cauldron Ring 19/372 (recomputed 2026-08-26), Tellus 40/43 at 14 km (2026-10-17; 38 at the old 15 km). THESE ARE NOT FAC-105's FIGURES (11/29/52) -- that ticket predates PlacementCapacity being rewritten to measure what RegionSampler's golden-angle lattice can actually place rather than estimating exclusion-cap area. The lattice delivers 20-25% below the area estimate, so every earlier ceiling was too high and the first version of this file put 40 nodes on a Tellus that held 38 at 15 km. Recompute from PlacementCapacity.OnSphere before changing a count; do not trust a number written in prose.",
+  "// FCTM": "FCTM's nests are authored now -- world_recipe.json's Features block, six deep-space ore spheres (FAC-104). Its entry is below. UNKN remains authored-empty on purpose, which is a different statement from absent.",
+  "// The roster is this world's": "Tags are the factions THIS world actually has, read from 'factions list' on awl-standalone-test 2026-08-26: SPRT FCTM UNKN IMPR MEMN METC IGSL UVCO TFEG TFCS STCG ISBT UNGD. The first version of this file used the previous world's roster -- only 3 of its 12 tags existed here, and 45 of 65 nodes would have been placed for owners that do not exist, reported as a clean apply. EstateSeeder now refuses a recipe naming a faction the world lacks; if that refusal fires, fix the tags here rather than widening the check.",
+  "// Ships": "How many hulls each faction starts with, by ROLE. The fleet half of the bootstrap Founded is the station half of: a hull is built from a BOM out of node inventory that a fresh estate has not accumulated, so a genesis world has almost no ships for weeks. Measured on the previous world 2026-09-01, after six days: 893 nodes, 207 stations, 32 hulls across 14 factions, five of them holding none. Seed capital does not substitute -- hulls are not bought.",
+  "// Three roles, not ten": "Mine, Haul and Guard, and no others, because there are only three pools. ShipPool.IsSuitableFor resolves Trade/Gift/Haul to one cargo predicate, Raid/Retaliate/Conquer/Guard/Patrol to one combat predicate, and Mine to its own. A second role from the same pool would read as a second intent while delivering more of the same hull.",
+  "// Sizing": "Sized against Founded, not against node count, because a hull parks at a station. Roughly two per station for the small estates, thinner for the large ones. The counts lean on personality rather than being uniform -- see the per-faction notes -- so the file says something about each faction rather than just funding them all equally.",
+  "// The gravity check is the dry run": "UNTESTED AGAINST REAL GRAVITY. EstateSeeder skips any hull that cannot hold altitude where it would park, and a settler's founded nodes are all on Tellus at ~1 g. The 'factions world estate' DRY RUN is what proves these counts land: it reports every skip with the node and its gravity. Read it before applying, and if a faction comes up short the fix is the count or the estate, not the filter.",
+  "// Capabilities": "What each faction starts with installed. Operator, 2026-09-01: every faction begins with a full set. One node each, level 1 -- the point is that the whole chain exists on day one, not that any of it is deep. A genesis faction otherwise develops from nothing and the economy has no consumer for its own ore for days.",
+  "// Dependency order": "AUTHORING ORDER IS DEPENDENCY ORDER, and the seeder sorts to it anyway (CapabilityPrerequisites: Manufactory needs Refinery, Shipyard and ManufactoryII need Manufactory, RefineryII needs Refinery). Written in that order because it also reads as the build-up, and because the sort is stable -- two capabilities that do not depend on each other keep the order they are listed in.",
+  "// Placement is derived": "WHERE each one lands is NOT authored. The seeder puts it on the founded node with the highest NodeContent.CapabilityAffinityFor, the same ranking InvestmentTargeting uses -- so a fuel depot finds ice and a refinery finds ore without anyone writing it twice. Affinity is re-read after every install, which is why the Shipyard lands on a node that already refines or assembles: its row scores HasIndustry.",
+  "// SensorArray": "SensorArray is authored even though FactionTuning.AllCapabilities omits it -- the brain iterates that array, so it can never propose one for itself, and this is the only way a faction gets one today. The omission is a defect, reported separately; the recipe parses against the NodeCapabilityKind enum instead so it is not inherited here.",
+  "Factions": [
+    {
+      "// SPRT": "Power base in the ring, small estates on the two habitable rocks. The close, recurring enemy -- it lives among the ore rather than out past everything.",
+      "Tag": "SPRT",
+      "Founded": 8,
+      "// Ships": "Raider. Combat-forward and short of miners on purpose -- it is supposed to take ore rather than dig it, and a raider that starts self-sufficient never has a reason to raid.",
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 3
+        },
+        {
+          "Role": "Guard",
+          "Count": 6
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Feature": "Cauldron Ring",
+          "Nodes": 10
+        },
+        {
+          "Body": "Agni",
+          "Nodes": 3
+        },
+        {
+          "Body": "Kor",
+          "Nodes": 2
+        }
+      ]
+    },
+    {
+      "// FCTM": "The deep-space antagonist (FAC-104). Its whole estate is the six nests -- no planet, no orbit, no ring. Ten nodes in each far nest and five in each near one: a 750 km sphere with three nodes in it is still three nodes, and conquest difficulty is what has to be taken, not how much empty space surrounds it. The home is what costs to crack; the forward posts are meant to be exposed. 45 nodes makes FCTM the largest holder in the world, which is deliberate -- it does not eat (FAC-103) and is not on anyone's clock.",
+      "Tag": "FCTM",
+      "Founded": 20,
+      "// Ships": "No Mine and no cargo-trade intent: it does not eat (FAC-103), and no Factorum hull carries a drill anyway -- authoring one would hand it an off-livery generic miner. Haul moves what it takes. Its 14 hulls over 20 stations is the thinnest per-station fleet in the world, which is what makes its estate a frontier to raid rather than a wall.",
+      "Ships": [
+        {
+          "Role": "Haul",
+          "Count": 5
+        },
+        {
+          "Role": "Guard",
+          "Count": 9
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Feature": "Cinder Nest",
+          "Nodes": 5
+        },
+        {
+          "Feature": "Hollow Nest",
+          "Nodes": 5
+        },
+        {
+          "Feature": "Ashfall Nest",
+          "Nodes": 5
+        },
+        {
+          "Feature": "Far Nest Umbra",
+          "Nodes": 10
+        },
+        {
+          "Feature": "Far Nest Vigil",
+          "Nodes": 10
+        },
+        {
+          "Feature": "Far Nest Threnody",
+          "Nodes": 10
+        }
+      ]
+    },
+    {
+      "// The other ten": "Main power base on Tellus, one forward presence each on the Ring, Agni or Kor. HEADSTART RAISED 2026-10-17 (operator: Tellus was conquered too easily): four Tellus nodes each (was three, with Tellus re-authored 15 -> 14 km to fit), Founded 5 (was 2-3) so every Tellus node starts with a station, and four Guard hulls (was one, two for ISBT). Mine and Haul unchanged. Which one is an allocation, not a rule -- giving every faction a presence on every body is what made the brief unsatisfiable. Allocated in tag order so the file is reproducible; no faction is meant to be favoured by it.",
+      "Tag": "IGSL",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 3
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Feature": "Cauldron Ring",
+          "Nodes": 3
+        }
+      ]
+    },
+    {
+      "Tag": "IMPR",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 3
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Feature": "Cauldron Ring",
+          "Nodes": 3
+        }
+      ]
+    },
+    {
+      "Tag": "ISBT",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Feature": "Cauldron Ring",
+          "Nodes": 3
+        }
+      ]
+    },
+    {
+      "Tag": "MEMN",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 3
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Agni",
+          "Nodes": 2
+        }
+      ]
+    },
+    {
+      "Tag": "METC",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 3
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Agni",
+          "Nodes": 2
+        }
+      ]
+    },
+    {
+      "Tag": "STCG",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 3
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Agni",
+          "Nodes": 2
+        }
+      ]
+    },
+    {
+      "Tag": "TFCS",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 3
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Agni",
+          "Nodes": 2
+        }
+      ]
+    },
+    {
+      "Tag": "TFEG",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Kor",
+          "Nodes": 1
+        }
+      ]
+    },
+    {
+      "Tag": "UNGD",
+      "Founded": 5,
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 2
+        },
+        {
+          "Role": "Haul",
+          "Count": 2
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Kor",
+          "Nodes": 1
+        }
+      ]
+    },
+    {
+      "Tag": "UVCO",
+      "Founded": 5,
+      "// Ships": "Mercantile. One miner, three haulers: it buys ore rather than digging it.",
+      "Ships": [
+        {
+          "Role": "Mine",
+          "Count": 1
+        },
+        {
+          "Role": "Haul",
+          "Count": 3
+        },
+        {
+          "Role": "Guard",
+          "Count": 4
+        }
+      ],
+      "Capabilities": [
+        {
+          "Kind": "Refinery",
+          "Count": 1
+        },
+        {
+          "Kind": "Manufactory",
+          "Count": 1
+        },
+        {
+          "Kind": "RefineryII",
+          "Count": 1
+        },
+        {
+          "Kind": "ManufactoryII",
+          "Count": 1
+        },
+        {
+          "Kind": "Shipyard",
+          "Count": 1
+        },
+        {
+          "Kind": "FuelDepot",
+          "Count": 1
+        },
+        {
+          "Kind": "SensorArray",
+          "Count": 1
+        }
+      ],
+      "Regions": [
+        {
+          "Body": "Tellus",
+          "Nodes": 4
+        },
+        {
+          "Body": "Kor",
+          "Nodes": 1
+        }
+      ]
+    },
+    {
+      "// UNKN": "The abandoned-node graveyard, not a competitor. Authored empty ON PURPOSE -- it receives territory only when a real faction withdraws or decays. Empty here is a statement; contrast FCTM, which is absent because its features do not exist yet.",
+      "Tag": "UNKN",
+      "Founded": 0,
+      "Regions": []
+    }
+  ],
+  "// Relations": "The authored diplomacy (FAC-108). SE mints a relation table once, behind the same one-shot flag as the factions and their stations, and derives every value from the minimum station-to-station distance per faction pair. This world then purged that station layout and placed its own, so the table on disk describes geometry that no longer exists -- measured 2026-08-26, recomputing it against the real estate would change 25 of 55 pairs and flip 14 across a Friend/Neutral/Enemy band. Re-running the generator was rejected because its inputs are degenerate here: Miner and Military hold exactly one pair each, so min equals max and the pair is forced to an extreme whatever the distance, and the three Builders span 41 km of a 5,000 km world stretched across the full hostile range. It does not give a better answer than the stale one, it gives a differently arbitrary one. This file is the statement instead.",
+  "// Relations is the WHOLE table": "Applying writes every pair among the registered factions, not only the ones named here. A file that touched only its own entries would leave the rest holding whatever the generator last computed, and the world would be half designed and half inherited with nothing saying which half is which.",
+  "// Stances": "Enemies / Neutral / Friends, a named mark (HostileMin HostileMid NeutralMin NeutralMid FriendlyMin FriendlyMid FriendlyMax), or a raw reputation. Enemies and Friends resolve to the MID marks, not the extremes -- an authored stance is a starting position that play then moves, and starting at HostileMin is a floor with nothing left below it. A relation is one cell: SE keys it on an unordered pair, so writing both directions with different stances is refused rather than resolved by order.",
+  "// Why these blocs": "The Friends pairs are read off the estate's real geography rather than invented. Measured min station distances on the applied estate: MEMN-METC 14.5 km, METC-TFCS 14.9, METC-STCG 15.5, TFEG-UVCO 13.4, IGSL-IMPR 115 (both on the Ring). Three trade blocs -- an Agni/Tellus one around METC, a Kor one around UVCO, a Ring one around IGSL -- plus the two Militaries allied, which is the one pair SE's own FriendsWith already made. Everything between blocs starts Neutral ON PURPOSE: competition, not war. Inter-faction hostility is Core's Diplomacy to create through Raid and Conquer, and authoring it here would pre-empt the mechanism that is supposed to produce it.",
+  "// SPRT and FCTM": "Enemy of everyone, per FAC-104: SPRT is the close enemy that keeps coming back and costs you hulls, FCTM is the deep-space antagonist that costs you a lane. FCTM's uniform -1000 is already true live, but not because anyone authored it -- it is FactionType None, which SE's generator skips entirely, so it holds its definition's default relationship. Authoring it makes that a decision instead of an accident. SPRT is NOT already true: it sits Neutral with MEMN, TFCS, UNGD, UVCO and at -188 with STCG, so five of ten factions do not currently treat pirates as hostile, and SE resolves NPC-vs-NPC turret targeting through this table.",
+  "// UNKN": "Left to the Neutral default, and deliberately not an enemy. It is the abandoned-node graveyard, not a competitor; making it hostile would have the whole world shooting at derelicts.",
+  "Relations": {
+    "Default": "Neutral",
+    "Stances": {
+      "SPRT": {
+        "*": "Enemies"
+      },
+      "FCTM": {
+        "*": "Enemies"
+      },
+      "METC": {
+        "MEMN": "Friends",
+        "STCG": "Friends",
+        "TFCS": "Friends"
+      },
+      "UVCO": {
+        "TFEG": "Friends"
+      },
+      "IGSL": {
+        "IMPR": "Friends"
+      },
+      "ISBT": {
+        "UNGD": "Friends"
+      }
+    }
+  },
+  "// Founded": "How many of a faction's nodes start with a station already standing. Nodes are taken in Regions order, so a power base is founded before a forward presence. RAISED 34 -> 55 on 2026-08-26 after the survey retune (f3e961f): a full survey is now ~6.7 days per node and crossing the Found gate takes ~4.9 days of HOLDING a node, so these stations are the world's entire physical presence for the best part of a week rather than the minutes the first number assumed. At ~50% of each estate the bootstrap reads as what a faction has already built, with the rest as ground it is still working toward -- Found keeps real work. Nobody is left a one-station faction. This is a bootstrap, not the mechanic, and it wants tuning against a real week. RAISED 55 -> 78 on 2026-10-17: the ten Tellus factions found 5 each, covering all four Tellus nodes before the forward presence."
+}

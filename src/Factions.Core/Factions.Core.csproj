@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Factions.Core — the SE-FREE brain. No SE/Torch/IO dependencies, no NuGet packages.
+    netstandard2.0 so it can be referenced by both the net48 Torch plugin host and the net9 simulator.
+    This is what lets the whole model run (and be balanced/tested) without a server.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>Factions.Core</AssemblyName>
+    <RootNamespace>Factions.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Persistence only. Not SE/Torch, so Core stays "SE-free"; matches the ecosystem (Torch ships v13). -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,50 @@
+# Line-ending and diff policy for Factions.
+#
+# Why: this repo is edited on Linux and built/deployed on Windows. Without a
+# canonical policy, every cross-platform save rewrites EOLs and produces huge
+# whitespace-only diffs (see AGENTS.md "Known pitfalls"). Policy:
+#   - Text code/docs are stored LF in the repo, checked out native.
+#   - Windows PowerShell scripts stay CRLF (PS 5.1 / Windows tooling).
+#   - Vendored binaries are never touched.
+
+# Default: let Git decide text vs binary, normalize stored EOL to LF.
+* text=auto eol=lf
+
+# --- Source & docs: explicit LF (repo canonical) ---
+*.cs    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.xml   text eol=lf
+*.csproj text eol=lf
+*.txt   text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# --- Windows scripts: keep CRLF ---
+# PowerShell on the Windows deploy host (PS 5.1) is encoding/EOL sensitive.
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+
+# --- Binaries: never normalize or diff as text ---
+*.dll   binary
+*.pdb   binary
+*.exe   binary
+*.gz    binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.wav   binary
+*.svg   binary
+*.ico   binary
+
+# Real Gas Giants' own Config.xml bytes, kept exact: no BOM under an encoding="utf-16" declaration,
+# CRLF. RggConfigWriterTests asserts XDocument.Load still refuses it, which a normalised copy need not.
+tests/Factions.Core.Tests/Fixtures/rgg_config_live.xml -text

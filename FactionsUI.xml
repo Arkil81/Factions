@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!--
+  Pulsar plugin descriptor for FactionsUI (the Space Engineers client plugin).
+  See docs/client-plugin.md.
+
+  This file is what a Pulsar DEV FOLDER associates with the source tree. SourceDirectories below
+  is the ONLY thing stopping Pulsar from compiling this whole repository (Factions.Core, the Torch
+  host, the sim, the tests) into one assembly, so if the plugin suddenly fails with errors from
+  unrelated projects, the XML association was lost — re-set it in the Sources dialog.
+-->
+<PluginData xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="GitHubPlugin">
+
+  <!-- Stable identity. Never change this. -->
+  <Id>7B1F4C2E-9A3D-4E58-8C71-0D6B2A5F3E94</Id>
+
+  <RepoId>Arkil81/Factions</RepoId>
+
+  <FriendlyName>Factions UI</FriendlyName>
+  <Author>Arkil81</Author>
+  <Tooltip>Client UI for the Factions NPC-faction overhaul.</Tooltip>
+  <Description>Client-side companion to the Factions server plugin — the NPC-faction economic
+    overhaul for the AWL Space Engineers server.
+
+    Renders Factions data the server currently has to squeeze through GPS markers and chat, starting
+    with the ship scanner. Does nothing unless connected to a server running the Factions plugin.
+  </Description>
+
+  <!-- Only these directories are compiled. Everything else in the repo is server-side. -->
+  <SourceDirectories>
+    <Directory>src/FactionsUI</Directory>
+    <Directory>src/Factions.Wire</Directory>
+    <Directory>src/Factions.Shared</Directory>
+  </SourceDirectories>
+
+  <!-- Pulsar's compiler already references SpaceEngineers*/VRage*/Sandbox*/ProtoBuf* from Bin64
+       plus 0Harmony, Newtonsoft.Json, Mono.Cecil and NLog, so no NuGetReferences are needed. -->
+
+  <!-- The traffic-control voice library (FAC-419). Pulsar resolves this against the dev folder
+       root, or the repo archive on a hub install, and passes it to Plugin.LoadAssets. <Asset> is
+       Pulsar 2.4.0+; <AssetFolder> is the same thing before 2.4.0. Each version ignores the element
+       it does not know. A dev folder reads it only when FactionsUI.xml is attached to the folder
+       (docs/client-plugin.md). -->
+  <Asset Name="AssetFolder" Path="src/FactionsUI/Content"/>
+  <AssetFolder>src/FactionsUI/Content</AssetFolder>
+
+  <!-- .NET Framework 4.8 (Pulsar "Legacy") only until the net10.0 build is confirmed. Pulsar 2.4.0+
+       matches these against Tools.Runtime: CLR (Legacy on Windows), Mono (Legacy under Proton),
+       CoreCLR (Interim, .NET 10). Any other token hides the plugin; 2.3.x ignored the field. -->
+  <Runtimes>CLR;Mono</Runtimes>
+
+  <!-- Set when published to PluginHub; unused by a dev folder. -->
+  <Commit></Commit>
+
+</PluginData>

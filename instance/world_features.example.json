@@ -1,0 +1,90 @@
+{
+  "// world_features.json": "Deep space holds minerals ONLY where a feature says so. No file = no ore in space, which is the shipped default and the intended end state. Copy this file to 'world_features.json' beside tuning.json to author a world. THIS FILE IS AN EXAMPLE AND NOTHING RUNS ON IT -- for the features the live world actually uses, see instance/worlds/awl-factions-genesis/. See docs/ore-geography.md.",
+  "// Shape": "Sphere = ball at Center with OuterRadiusKm. Ring = flat annulus in the plane whose normal is Normal, between Inner/OuterRadiusKm and within HalfThicknessKm of that plane. Shell = hollow ball between Inner/OuterRadiusKm.",
+  "// AnchorPlanetId": "Optional. When set, Center is ignored and the feature follows that planet. Prefer this to a literal Center for anything orbiting a body: it survives a world regenerate, and it cannot silently rot if the body moves. The id is the SE EntityId as a string -- read it from planets.json in the instance folder, or from the 'Ore geography:' boot lines.",
+  "// Bands": "Optional, Ring only. Concentric sub-annuli in km with gaps between them. Omit for a solid ring. A band may carry its own Density and its own Materials; either one omitted inherits the feature's. An EXPLICITLY EMPTY Materials list on a band is a statement that the band is barren, exactly as it is on a feature -- omitting the key and writing [] are different things.",
+  "// Zone": "Optional. The NodeZone every node inside this region belongs to -- Surface, Orbit or DeepSpace. Omit it and the region defers to gravity classification, which is what every feature authored before this field existed does. ZONE'S REMAINING JOB IS SEPARATION (NodeSeparationFor: Surface 15 km, Orbit 30 km, DeepSpace 500 km), so authoring it is really authoring how densely the region may be settled. Author it on any region a gravity well cuts through: Cauldron's well ends at 304.89 km and its ring spans 195-465 km, so without Zone the inner bands are Orbit and the outer bands DeepSpace -- one feature, two settlement densities, and the split falls through the middle of a single band.",
+  "// SeparationKm": "Optional. Minimum distance between faction nodes inside this region, in km. Omit it and the region defers to the global per-zone floor (Surface 15, Orbit 30, DeepSpace 500). This is the knob that decides how many nodes a region can hold, and the leverage is large: a 200 km deep-space feature holds ~0.3 nodes at the 500 km floor and several thousand at 15 km. DELIBERATELY NOT CAPPED (operator, 2026-08-26: 'No cap, authored intent wins') -- inside an authored region the constraint is what the author meant, not what the geometry defaults to. Node count is what the influence field and the per-faction brain files scale with, so a small value on a large region is a real cost, knowingly taken.",
+  "// Density": "0..1, and deliberately the SAME SHAPE AS SE'S OWN ProceduralDensity slider so it reads the way an SE player already expects. It scales against FeatureMaxDensityPer1000Km3 in tuning.json (default 8.0 objects per 1000 km3, roughly one every 5 km), so the whole world gets denser or thinner from one key. DENSITY 0 IS THE DEFAULT AND MEANS NO PHYSICAL ROCK: the feature still tells the economy what minerals are in that region, it just puts nothing there to fly into. Count is computed over the feature's real volume, and for a banded ring band by band -- the gaps are genuinely empty and are not charged volume.",
+  "// Materials": "Bare SE subtype ids, unprefixed. Share is relative, not a percentage. BandDepthM is deposit thickness in metres and feeds richness on the same scale as a planet's ore band. SizeRange is the size in metres of the individual objects made of this material -- per material because an ice chunk and a metal body are not the same size; omit it for the 64-256 m default. An EMPTY Materials list is meaningful: it authors a deliberately barren region that still shadows the planet reader beneath it.",
+  "// DepositCountCoefficient / DepositSizeDenominator": "How much ORE a rock of this material actually holds, as opposed to which ore it is. Both are SE's own world settings, named as SE names them, applied per material instead of per world; omit either to inherit the world's value. Count is a multiplier on SE's pocket count (stock 1 gives a 256 m rock three pockets, which measures ~99% stone -- correct for an asteroid, but nothing an author could previously say anything about). Denominator is INVERTED: SE computes pocket radius as size/denominator + 8, so SMALLER means BIGGER deposits. A rich seam might be count 4 with denominator 30; a barren rock, count 0.5.",
+  "Features": [
+    {
+      "// A plain asteroid belt": "Free-floating, no anchor. Delete or replace -- this is illustration, not content.",
+      "Name": "Example Belt",
+      "Shape": "Sphere",
+      "Center": {
+        "X": 12000.0,
+        "Y": 0.0,
+        "Z": -4000.0
+      },
+      "OuterRadiusKm": 600.0,
+      "// Density on a sphere": "A 600 km ball is ~9.0e8 km3 -- vastly more volume than a ring, so a belt you can cross wants a much lower number than the ring's. 0.02 of the 8.0 ceiling is 0.16 per 1000 km3, roughly one rock every 18 km.",
+      "Density": 0.02,
+      "// SizeRange": "The rare material is authored small. Silver is a find, not a landmark: the player should have to look.",
+      "Materials": [
+        {
+          "SubTypeId": "Iron",
+          "Share": 0.55,
+          "BandDepthM": 10.0,
+          "SizeRange": {
+            "MinM": 80.0,
+            "MaxM": 320.0
+          }
+        },
+        {
+          "SubTypeId": "Nickel",
+          "Share": 0.25,
+          "BandDepthM": 8.0,
+          "SizeRange": {
+            "MinM": 80.0,
+            "MaxM": 280.0
+          }
+        },
+        {
+          "SubTypeId": "Cobalt",
+          "Share": 0.15,
+          "BandDepthM": 6.0,
+          "SizeRange": {
+            "MinM": 64.0,
+            "MaxM": 200.0
+          }
+        },
+        {
+          "SubTypeId": "Silver",
+          "Share": 0.05,
+          "BandDepthM": 4.0,
+          "SizeRange": {
+            "MinM": 48.0,
+            "MaxM": 110.0
+          }
+        }
+      ]
+    },
+    {
+      "// A gas pocket": "Hydrogen and Oxygen are ordinary materials here -- a feature carries a composition, and whether it is ore, ice or gas is data rather than a separate subsystem. Gives FuelDepot a reason to be somewhere.",
+      "Name": "Example Gas Pocket",
+      "Shape": "Shell",
+      "Center": {
+        "X": -30000.0,
+        "Y": 2000.0,
+        "Z": 15000.0
+      },
+      "InnerRadiusKm": 200.0,
+      "OuterRadiusKm": 900.0,
+      "// No Density here, on purpose": "Gas is not rock. Omitting Density leaves it at 0, so nothing physical spawns while the region still tells the economy it holds hydrogen and oxygen. This is what every feature authored before Density existed does, and it is why adding the field changed no existing world.",
+      "Materials": [
+        {
+          "SubTypeId": "Hydrogen",
+          "Share": 0.7,
+          "BandDepthM": 20.0
+        },
+        {
+          "SubTypeId": "Oxygen",
+          "Share": 0.3,
+          "BandDepthM": 20.0
+        }
+      ]
+    }
+  ]
+}

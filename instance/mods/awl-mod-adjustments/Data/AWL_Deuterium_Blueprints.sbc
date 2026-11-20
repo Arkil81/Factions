@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AWL Mod Adjustments: synthesised deuterium (docs/deuterium-fusion.md).
+     The large Assembler makes Life'Tech's own deuterium ore from ice and uranium, so synthesised and
+     far-nest deuterium are one item. It must be ORE: SE's conveyors feed a gas generator only ore-typed
+     items (MyGasGenerator builds its pull constraint from Ore ids alone).
+     The Vaporizer gives 11.52 L per unit, so one batch = 250 units = 2,880 L = 14,400 MW*s at
+     5 MW*s per litre: 4x what its uranium gives in a fission reactor, 14.4 MW*s per ice.
+     IgnoreEfficiencyMultiplier: the world's x3 assembler efficiency must not move a fuel's balance. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Blueprints>
+    <Blueprint>
+      <Id>
+        <TypeId>BlueprintDefinition</TypeId>
+        <SubtypeId>AWL_DeuteriumFromIce</SubtypeId>
+      </Id>
+      <DisplayName>Deuterium (synthesised)</DisplayName>
+      <Icon>Textures\GUI\Icons\component\BatteryComponent.dds</Icon>
+      <Prerequisites>
+        <Item Amount="1000" TypeId="Ore" SubtypeId="Ice" />
+        <Item Amount="1" TypeId="Ingot" SubtypeId="Uranium" />
+      </Prerequisites>
+      <Result Amount="250" TypeId="Ore" SubtypeId="Deuterium1" />
+      <BaseProductionTimeInSeconds>20</BaseProductionTimeInSeconds>
+      <IgnoreEfficiencyMultiplier>true</IgnoreEfficiencyMultiplier>
+    </Blueprint>
+  </Blueprints>
+</Definitions>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Factions.Sim — runs the whole faction model offline (no SE) for balancing + troubleshooting. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>factions-sim</AssemblyName>
+    <RootNamespace>Factions.Sim</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Factions.Core\Factions.Core.csproj" />
+  </ItemGroup>
+
+</Project>

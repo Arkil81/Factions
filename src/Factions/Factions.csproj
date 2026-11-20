@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Factions — standalone Torch plugin (the NPC-faction economic "brain").
+    Unlike AWL's CrunchEcon scripts (Roslyn-compiled at runtime), this is a real plugin DLL, so
+    `dotnet build` IS the authoritative compile. Ships as Factions.zip (DLL + manifest) -> Plugins/.
+    SE/Torch reference DLLs are provided by the server at runtime, hence Private=false everywhere.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <!-- net48 fully supports up to C# 7.3 without extra runtime polyfills; stay at/below it. -->
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>Factions</AssemblyName>
+    <RootNamespace>Factions</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Deterministic>true</Deterministic>
+
+    <!-- Reference roots. Override on the CLI (/p:TorchRoot=... /p:SEBin64=...) for CI/containers. -->
+    <TorchRoot Condition="'$(TorchRoot)' == '' and Exists('C:\Torch\torch-server')">C:\Torch\torch-server</TorchRoot>
+    <TorchDir Condition="'$(TorchDir)' == ''">$(TorchRoot)\DedicatedServer64</TorchDir>
+    <SEBin64 Condition="'$(SEBin64)' == '' and Exists('C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64')">C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64</SEBin64>
+    <!-- SE reference assemblies: prefer the Steam Bin64, else Torch's DedicatedServer64 copy. -->
+    <SERefDir Condition="'$(SEBin64)' != '' and Exists('$(SEBin64)')">$(SEBin64)</SERefDir>
+    <SERefDir Condition="'$(SERefDir)' == ''">$(TorchDir)</SERefDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Torch"><HintPath>$(TorchRoot)\Torch.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Torch.API"><HintPath>$(TorchRoot)\Torch.API.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="NLog"><HintPath>$(TorchRoot)\NLog.dll</HintPath><Private>false</Private></Reference>
+
+    <Reference Include="Sandbox.Common"><HintPath>$(SERefDir)\Sandbox.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Sandbox.Game"><HintPath>$(SERefDir)\Sandbox.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SpaceEngineers.Game"><HintPath>$(SERefDir)\SpaceEngineers.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SpaceEngineers.ObjectBuilders"><HintPath>$(SERefDir)\SpaceEngineers.ObjectBuilders.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage"><HintPath>$(SERefDir)\VRage.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Game"><HintPath>$(SERefDir)\VRage.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Library"><HintPath>$(SERefDir)\VRage.Library.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Render"><HintPath>$(SERefDir)\VRage.Render.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Math"><HintPath>$(SERefDir)\VRage.Math.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="HavokWrapper"><HintPath>$(SERefDir)\HavokWrapper.dll</HintPath><Private>false</Private></Reference>
+    <!-- The assembly SE itself serializes mod messages with; a weapon framework publishes its
+         definitions as protobuf payloads. Not copied locally: the process already has it. -->
+    <Reference Include="ProtoBuf.Net.Core"><HintPath>$(SERefDir)\ProtoBuf.Net.Core.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The SE-free brain + persistence. Newtonsoft comes in transitively (Torch provides it at runtime). -->
+    <ProjectReference Include="..\Factions.Core\Factions.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Source compiled into BOTH this plugin and FactionsUI, mirroring how Factions.Wire is
+         shared. Only for code where the two MUST behave identically and a divergence would be
+         silent. See ..\Factions.Shared\README.md. Everything there is inside this project's
+         C# 7.3 ceiling. -->
+    <Compile Include="..\Factions.Shared\**\*.cs" LinkBase="Factions.Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Wire contract shared verbatim with the FactionsUI client plugin (src/FactionsUI). Source
+         include rather than a project reference so Pulsar can compile the same files client-side
+         from its own SourceDirectories list. LangVersion 7.3 applies to these files. -->
+    <Compile Include="..\Factions.Wire\**\*.cs" LinkBase="Factions.Wire" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Harmony is not bundled by Torch, so Private=true copies 0Harmony.dll into our output and zip. -->
+    <PackageReference Include="Lib.Harmony" Version="2.3.3">
+      <Private>true</Private>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

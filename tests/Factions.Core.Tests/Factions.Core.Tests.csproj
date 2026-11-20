@@ -1,0 +1,102 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A real brain file off the live server (2026-08-19, 169 nodes, all eight NodeKind ordinals
+         in use). FAC-102 retires the persisted Kind ordinal, and its own "Persistence - the trap"
+         section is explicit that a migration must be tested against a real file rather than a
+         synthesised one: the ordinal is an int, and a decoy string Kind elsewhere in the same file
+         makes a grep confirm the wrong answer. -->
+    <None Include="Fixtures\UNKN.brain.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\rgg_config_live.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- For HarmonyPatcher, the shared patch pass. The client's version: the server's 2.3.3 cannot
+         patch at all on net9 (MonoMod throws declaring a local). The class-processor loop the
+         patcher drives is the same in both. -->
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The patch pass both plugins run instead of Harmony.PatchAll (FAC-435). It is the only file
+         in Factions.Shared that does not touch SE, and the only one whose failure mode - a patch
+         that does not resolve - can be produced on purpose without a game. -->
+    <Compile Include="..\..\src\Factions.Shared\HarmonyPatcher.cs" LinkBase="Factions.Shared" />
+    <!-- The landing probe's box snap and content checksum. SE-free, and the half of the probe whose
+         failure - server and client snapping to different boxes - would read as terrain divergence. -->
+    <Compile Include="..\..\src\Factions.Shared\LandingProbeMath.cs" LinkBase="Factions.Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Factions.Core\Factions.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The client/server wire contract, by source include exactly as the Torch host and
+         FactionsUI take it. Nothing else exercises the codec: a break in it is invisible until
+         a live client silently fails to uplink. -->
+    <Compile Include="..\..\src\Factions.Wire\**\*.cs" LinkBase="Factions.Wire" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The abstract-only fleet spawner, by source include. It implements every member of
+         IFleetSpawner and materialises nothing, so it is where a change to the seam's shape shows
+         up first, and the one place the "closed nothing is not a failure" contract on Despawn's
+         count can be asserted without an SE session. -->
+    <Compile Include="..\..\src\Factions.Sim\SimTransitSpawner.cs" LinkBase="Factions.Sim" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The recipe-exclusion rules, by source include. SE-free (System + Newtonsoft only) but it
+         lives in the Torch host project, and it decides which recipes every manager is allowed to
+         see at all: otherwise only exercised by resolving real SE blueprint classes on a live
+         server. -->
+    <Compile Include="..\..\src\Factions\CapabilityRecipesConfig.cs" LinkBase="Factions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Station naming, by source include. Both files are SE-free but live in the Torch host
+         project; nothing in Core reaches them, so the uniqueness and exhaustion rules that decide
+         whether a station can be named at all are otherwise untested. -->
+    <Compile Include="..\..\src\Factions\NameSelector.cs" LinkBase="Factions" />
+    <Compile Include="..\..\src\Factions\StationNameCatalogue.cs" LinkBase="Factions" />
+    <Compile Include="..\..\src\Factions\TrafficVoiceMap.cs" LinkBase="Factions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The dashboard's snapshot builder and its DTOs, by source include. Both are ASP.NET-free
+         (System + System.Text.Json + Newtonsoft + Core) and nothing in Core reaches them, so the
+         directory each input resolves from is otherwise only observable by reading /api/world off
+         a live server: a read off the shared data directory silently produces a zero transit
+         contract and draws every fleet complete. -->
+    <Compile Include="..\..\src\Factions.Api\SnapshotService.cs" LinkBase="Factions.Api" />
+    <Compile Include="..\..\src\Factions.Api\Dtos.cs" LinkBase="Factions.Api" />
+    <Compile Include="..\..\src\Factions.Api\PrefabCostCatalogue.cs" LinkBase="Factions.Api" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The live-event pipeline's two ends, by source include. Both are SE-free and free of their
+         own project's host dependencies (no Torch, no ASP.NET), and neither is reachable from Core:
+         the row caps that bound a demands snapshot and the tail reader that survives the writer
+         rotating the file under it are otherwise only exercised on the live server. -->
+    <Compile Include="..\..\src\Factions\DemandsSnapshotPayload.cs" LinkBase="Factions" />
+    <Compile Include="..\..\src\Factions.Api\Services\JsonlTailReader.cs" LinkBase="Factions.Api" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The dashboard service's own process log, by source include. ASP.NET-free; its retention and
+         its never-throw contract are otherwise only exercised on the live service. -->
+    <Compile Include="..\..\src\Factions.Api\Services\ApiFileLog.cs" LinkBase="Factions.Api" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AWL Mod Adjustments: Cauldron System planet ore maps, re-banded onto BetterStone minerals.
+     Applied by ModAdjusterV2 at LoadData, on the server and on every client, before any planet is built.
+     Each OreMappings list REPLACES the generator's whole map, so every band is listed, changed or not.
+     Byte values, depths and tints are the Cauldron System originals; only Type differs where remapped. -->
+<Definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <PlanetGeneratorDefinitions>
+    <PlanetGeneratorDefinition>
+      <Id>
+        <TypeId>PlanetGeneratorDefinition</TypeId>
+        <SubtypeId>Tellus</SubtypeId>
+      </Id>
+      <OreMappings>
+        <Ore Value="10" Type="Iron_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="20" Type="Iron_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="30" Type="Iron_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="40" Type="Iron_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="50" Type="Nickel_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="60" Type="Nickel_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="70" Type="Nickel_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="80" Type="Nickel_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="90" Type="Silicon_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="100" Type="Silicon_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="110" Type="Silicon_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="120" Type="Silicon_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="130" Type="Magnesium_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="140" Type="Magnesium_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="150" Type="Magnesium_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="160" Type="Magnesium_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="170" Type="Cobalt_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="180" Type="Cobalt_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="190" Type="Cobalt_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="200" Type="Cobalt_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="15" Type="Iron_02" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="25" Type="Iron_02" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="35" Type="Iron_02" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="45" Type="Iron_02" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="55" Type="Taenite_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="65" Type="Taenite_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="75" Type="Taenite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="85" Type="Taenite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="95" Type="Quartz_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="105" Type="Quartz_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="115" Type="Quartz_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="125" Type="Quartz_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="135" Type="Dolomite_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="145" Type="Dolomite_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="155" Type="Dolomite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="165" Type="Dolomite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="175" Type="Cattierite_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="185" Type="Cattierite_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="195" Type="Cattierite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="205" Type="Cattierite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="230" Type="Gold_01" Start="10" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="240" Type="Pyrite_01" Start="20" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="250" Type="Porphyry_01" Start="30" Depth="40" TargetColor="#000000" ColorInfluence="1" />
+      </OreMappings>
+    </PlanetGeneratorDefinition>
+    <PlanetGeneratorDefinition>
+      <Id>
+        <TypeId>PlanetGeneratorDefinition</TypeId>
+        <SubtypeId>Agni</SubtypeId>
+      </Id>
+      <OreMappings>
+        <Ore Value="10" Type="Iron_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="20" Type="Iron_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="30" Type="Pyrite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="40" Type="Pyrite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="50" Type="Nickel_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="60" Type="Nickel_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="70" Type="Heazlewoodite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="80" Type="Heazlewoodite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="90" Type="Silicon_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="100" Type="Silicon_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="110" Type="Sinoite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="120" Type="Sinoite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="130" Type="Magnesium_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="140" Type="Magnesium_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="150" Type="Olivine_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="160" Type="Olivine_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="170" Type="Platinum_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="180" Type="Platinum_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="190" Type="Sperrylite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="200" Type="Cooperite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="220" Type="Gold_01" Start="5" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="240" Type="Cobalt_01" Start="5" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+      </OreMappings>
+    </PlanetGeneratorDefinition>
+    <PlanetGeneratorDefinition>
+      <Id>
+        <TypeId>PlanetGeneratorDefinition</TypeId>
+        <SubtypeId>Kor</SubtypeId>
+      </Id>
+      <OreMappings>
+        <Ore Value="10" Type="Nickel_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="20" Type="Nickel_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="30" Type="Heazlewoodite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="40" Type="Heazlewoodite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="50" Type="Silicon_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="60" Type="Silicon_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="70" Type="Wadsleyite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="80" Type="Wadsleyite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="90" Type="Magnesium_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="100" Type="Akimotoite_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="110" Type="Gold_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="120" Type="Gold_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="130" Type="Electrum_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="140" Type="Petzite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="150" Type="Silver_01" Start="10" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="160" Type="Silver_01" Start="20" Depth="20" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="170" Type="Galena_01" Start="30" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="180" Type="Chlorargyrite_01" Start="40" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="190" Type="Cobalt_01" Start="30" Depth="15" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="200" Type="Cohenite_01" Start="40" Depth="25" TargetColor="#000000" ColorInfluence="1" />
+        <Ore Value="220" Type="Uraninite_01" Start="10" Depth="30" TargetColor="#000000" ColorInfluence="1" />
+      </OreMappings>
+    </PlanetGeneratorDefinition>
+  </PlanetGeneratorDefinitions>
+</Definitions>

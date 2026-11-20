@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    FactionsUI — Space Engineers CLIENT plugin, loaded by Pulsar (https://github.com/SpaceGT/Pulsar).
+    See docs/client-plugin.md.
+
+    NOT part of build.ps1 -Deploy: this ships to a player's Pulsar folder, not to Factions.zip.
+    The live iteration loop is Pulsar's dev folder, which compiles this from source itself; this
+    csproj exists for IDE/CLI builds and error checking. There is deliberately NO post-build deploy
+    target — on the Torch box the build account cannot write the player account's Pulsar folder, so
+    an %AppData%-resolving copy step would silently target the wrong profile.
+
+    C# 7.3 does NOT apply here (unlike Factions.Core / Factions / Factions.Sim): Pulsar parses at
+    LanguageVersion.CSharp14. But ../Factions.Wire IS also compiled into the net48 Torch host, so
+    everything under that folder must stay inside the 7.3 ceiling.
+
+    SE client reference DLLs are provided by the game at runtime, hence Private=false everywhere.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AssemblyName>FactionsUI</AssemblyName>
+    <RootNamespace>FactionsUI</RootNamespace>
+    <LangVersion>14</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- net10.0 (Pulsar's Interim edition) is a later addition: the only .NET 10 SDK on the build
+         box is a preview. Add it here once confirmed to build. -->
+    <TargetFramework>net48</TargetFramework>
+    <DefineConstants>$(DefineConstants);DEV_BUILD</DefineConstants>
+  </PropertyGroup>
+
+  <!-- SE CLIENT Bin64 (not the server's DedicatedServer64 — this links against client-only
+       assemblies such as Sandbox.Graphics and VRage.Input). Override on the CLI with
+       /p:SEBin64=... ; the probes below cover the standard Steam locations. -->
+  <PropertyGroup>
+    <SEBin64 Condition="'$(SEBin64)' == '' and Exists('C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64')">C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64</SEBin64>
+    <SEBin64 Condition="'$(SEBin64)' == '' and Exists('$(HOME)/.steam/steam/steamapps/common/SpaceEngineers/Bin64')">$(HOME)/.steam/steam/steamapps/common/SpaceEngineers/Bin64</SEBin64>
+  </PropertyGroup>
+
+  <Target Name="VerifySEBin64" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(SEBin64)' == '' or !Exists('$(SEBin64)')"
+           Text="SE client Bin64 not found. Pass /p:SEBin64=&lt;path to SpaceEngineers\Bin64&gt;. This project needs the GAME CLIENT install, not Torch's DedicatedServer64." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="Sandbox.Common"><HintPath>$(SEBin64)\Sandbox.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Sandbox.Game"><HintPath>$(SEBin64)\Sandbox.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Sandbox.Graphics"><HintPath>$(SEBin64)\Sandbox.Graphics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SpaceEngineers.Game"><HintPath>$(SEBin64)\SpaceEngineers.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SpaceEngineers.ObjectBuilders"><HintPath>$(SEBin64)\SpaceEngineers.ObjectBuilders.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ProtoBuf.Net"><HintPath>$(SEBin64)\ProtoBuf.Net.dll</HintPath><Private>false</Private></Reference>
+    <!-- SE's MVVM screens (the store block among them) derive their view models and item models
+         from EmptyKeys types, so touching one at all needs this on the reference list. Pulsar does
+         not name it in Legacy/References.cs, but RoslynReferences walks each referenced assembly's
+         own dependencies, and Sandbox.Game carries it — so the dev-folder compile has it already
+         and this line only brings the IDE/CLI build level with it. -->
+    <Reference Include="EmptyKeys.UserInterface"><HintPath>$(SEBin64)\EmptyKeys.UserInterface.dll</HintPath><Private>false</Private></Reference>
+    <!-- The layout primitives those controls are declared in terms of (Thickness among them) sit
+         in the Core assembly rather than the one carrying the controls, so building a control
+         imperatively needs both. Same standing as the line above: the dev-folder compile already
+         has it through the dependency walk, and this only brings the IDE/CLI build level with it. -->
+    <Reference Include="EmptyKeys.UserInterface.Core"><HintPath>$(SEBin64)\EmptyKeys.UserInterface.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ProtoBuf.Net.Core"><HintPath>$(SEBin64)\ProtoBuf.Net.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage"><HintPath>$(SEBin64)\VRage.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Game"><HintPath>$(SEBin64)\VRage.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Input"><HintPath>$(SEBin64)\VRage.Input.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Library"><HintPath>$(SEBin64)\VRage.Library.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Math"><HintPath>$(SEBin64)\VRage.Math.dll</HintPath><Private>false</Private></Reference>
+    <!-- The missile ceiling patch writes HkRigidBody.MaxLinearVelocity. Pulsar's dev-folder compile
+         already has this (RoslynReferences walks Sandbox.Game's own dependencies and it carries
+         HavokWrapper); this line only brings the IDE/CLI build level with it. -->
+    <Reference Include="HavokWrapper"><HintPath>$(SEBin64)\HavokWrapper.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.Render"><HintPath>$(SEBin64)\VRage.Render.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="VRage.UserInterface"><HintPath>$(SEBin64)\VRage.UserInterface.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Version-matched to Pulsar's expected Harmony (ConfigManager.HarmonyVersion = 2.4.2.0).
+         Pulsar loads 0Harmony itself, so Private=false — shipping a second copy risks a conflict. -->
+    <PackageReference Include="Lib.Harmony" Version="2.4.2">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared with the Torch host by source include, mirroring how Pulsar compiles both
+         SourceDirectories from FactionsUI.xml into one assembly. -->
+    <Compile Include="..\Factions.Wire\**\*.cs" LinkBase="Factions.Wire" />
+    <!-- Behaviour the server and this client must not disagree about. Today that is the voxel
+         material patch: both ends build the same rock from the same seed, and if only one narrowed
+         SE's material pool the same rock would be ice on one side and gold on the other, with
+         nothing to signal it. See ..\Factions.Shared\README.md. -->
+    <Compile Include="..\Factions.Shared\**\*.cs" LinkBase="Factions.Shared" />
+  </ItemGroup>
+</Project>
