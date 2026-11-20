@@ -18,9 +18,9 @@ and is projected into it when players are near.
 
 ## Installing the client plugin
 
-Factions UI installs through [Pulsar](https://github.com/SpaceGT/Pulsar) straight from this repository;
-the steps are on the [latest release](https://github.com/Arkil81/Factions/releases/latest). Client and
-server must speak the same wire protocol, which each release states.
+Factions UI installs through [Pulsar](https://github.com/SpaceGT/Pulsar) straight from this repository:
+see [Installing Factions UI](docs/install-client.md). Client and server must speak the same wire
+protocol, which each [release](https://github.com/Arkil81/Factions/releases) states.
 
 ## Building
 
