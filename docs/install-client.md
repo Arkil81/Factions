@@ -9,12 +9,43 @@ repository's source and keeps it up to date, so there is no file to download.
 
 ## Before you start
 
-- **Pulsar** installed and loading with Space Engineers:
-  [latest Pulsar release](https://github.com/SpaceGT/Pulsar/releases/latest).
-- **Space Engineers started with `-sources`.** Without this launch option Pulsar hides its
-  **Sources** button, and plugins from outside the Pulsar plugin list cannot be added. In Steam:
-  right-click Space Engineers → **Properties** → **General** → **Launch Options**, and add
-  `-sources`. Keep any options already there, separated by a space.
+You need two things in place before installing Factions UI.
+
+### 1. Pulsar
+
+Pulsar is the plugin loader that runs Space Engineers plugins. If you do not have it yet, download
+it from the [Pulsar releases page](https://github.com/SpaceGT/Pulsar/releases/latest) and follow
+its installation instructions. When it is working, the Space Engineers main menu has a **Plugins**
+button.
+
+### 2. The `-sources` launch option
+
+Pulsar normally only offers plugins from its own built-in list, and Factions UI is not on that list.
+To add a plugin from somewhere else, as this guide does, Pulsar has to be started with the launch
+option `-sources`. Without it, the **Sources** button used below does not appear at all.
+
+To add the launch option in Steam:
+
+1. In your Steam library, right-click **Space Engineers** and choose **Properties**.
+2. On the **General** page, find the **Launch Options** box. It may already contain text, for
+   example the line that makes Steam start the game through Pulsar, which ends in `%command%`.
+   Leave any existing text as it is.
+3. Click at the very end of the text, type a space, and then type `-sources`.
+4. Close the Properties window. Steam saves the change automatically.
+
+For example, if the box contained
+
+```
+"C:\Users\you\AppData\Roaming\Pulsar\Legacy.exe" %command%
+```
+
+it should now contain
+
+```
+"C:\Users\you\AppData\Roaming\Pulsar\Legacy.exe" %command% -sources
+```
+
+You only need to do this once. The option stays in place for every future game start.
 
 ## Install
 
