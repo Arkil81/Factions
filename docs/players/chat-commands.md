@@ -110,6 +110,16 @@ See [Diplomacy](diplomacy.md) for what each one does.
 
 These act on the crewed ship you are in, or the nearest one within 400 m.
 
+## Kits
+
+| Command | Who | What it does |
+|---|---|---|
+| `!factions kit` | anyone | Lists the kits you can claim, what each one holds, and when you can next claim it. |
+| `!factions kit (name)` | anyone | Claims a kit, for example `!factions kit starter`. |
+
+You do not need a faction for these. Each kit has its own wait between claims, and the wait applies
+across every server in the cluster. If your inventory is full, the rest of the kit floats beside you.
+
 ## Common replies
 
 | Reply | What it means |

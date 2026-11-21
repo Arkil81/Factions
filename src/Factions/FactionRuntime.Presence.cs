@@ -209,7 +209,10 @@ namespace Factions
             if (fleet.TargetNodeId != null && _queuedStations.ContainsKey(fleet.TargetNodeId))
             {
                 c.QueueStation = fleet.TargetNodeId;
-                c.Divertable = fleet.CurrentStopKind == FleetStopKind.Service || fleet.CurrentStopKind == FleetStopKind.Return;
+                // A Pickup diverts too: to another node of the same owner holding the item, or it gives
+                // up its errand (FAC-514). Without that it waits for as long as the share stays full.
+                c.Divertable = fleet.CurrentStopKind == FleetStopKind.Service || fleet.CurrentStopKind == FleetStopKind.Return
+                               || fleet.CurrentStopKind == FleetStopKind.Pickup;
                 return;
             }
             double best = QueueDockRadiusKm;
@@ -262,13 +265,16 @@ namespace Factions
                 // is abstract again (shed, or the player gone).
                 if (e.Materialised) continue;
                 string to;
+                string logId = LogIdOf(e.Key);
                 if (TryDivert(e, now, out to))
                 {
                     _queueDiverted++;
                     plan.Queued.Remove(e.Key);
-                    CallQueue(TrafficEventKind.Diverted, e, now, to);
+                    // A fleet that gave up its errand is not voiced: it was going nowhere the station
+                    // could name.
+                    if (to != null) CallQueue(TrafficEventKind.Diverted, e, now, to);
                     if (DebugTraces.Admission)
-                        _log.Write("TRAFFIC_DIVERTED " + LogIdOf(e.Key) + " station=" + e.Station + " to=" + to
+                        _log.Write("TRAFFIC_DIVERTED " + logId + " station=" + e.Station + " to=" + (to ?? "home")
                                    + " waited=" + (now - e.JoinedUtc).TotalSeconds.ToString("F0", CultureInfo.InvariantCulture) + "s");
                 }
                 else
@@ -462,7 +468,9 @@ namespace Factions
         }
 
         /// <summary>Sends a queued arrival to the nearest station its destination's owner holds that no
-        /// player is near. Its stop is replaced, so cargo is delivered, or a sale settled, there.</summary>
+        /// player is near. Its stop is replaced, so cargo is delivered, or a sale settled, there. A
+        /// Pickup is collected from another node of the same owner instead, or, with none, gives up its
+        /// errand and goes home: <paramref name="to"/> is then null.</summary>
         private bool TryDivert(StationQueues.Entry e, DateTime now, out string to)
         {
             to = null;
@@ -474,6 +482,7 @@ namespace Factions
             if (fleet.FleetId != e.Key || string.IsNullOrEmpty(fleet.TargetTag)) return false;
 
             Vec3 pos = fleet.CurrentPosKm(now, _tuning);
+            if (fleet.CurrentStopKind == FleetStopKind.Pickup) return TryDivertPickup(st, fi, fleet, e, pos, now, out to);
             SpatialNode best = null;
             double bestKm = double.MaxValue;
             foreach (SpatialNode node in _world.Graph.Nodes.Values)
@@ -494,6 +503,47 @@ namespace Factions
             _stationQueues.Remove(e.Key);
             _queueHeldAt.Remove(e.Key);
             to = best.Id;
+            return true;
+        }
+
+        /// <summary>A queued Pickup's divert: collected from the nearest other node of the pickup node's
+        /// owner with the item to spare (<see cref="QueueDivert.PickupSource"/>), or recalled home with
+        /// its hull and cargo when there is none. The recall is resolved by the next arrival pass, the
+        /// way a dismissed duplicate is; its arrival time is now, so no later plan queues it again.</summary>
+        private bool TryDivertPickup(FactionState st, int fi, PendingFleetAction fleet, StationQueues.Entry e, Vec3 pos,
+                                     DateTime now, out string to)
+        {
+            to = null;
+            if (fleet.MaterialisedEntityId != 0) return false;
+            var excluded = new HashSet<string>(_queuedStations.Keys, StringComparer.Ordinal);
+            foreach (string closed in _world.ClosedForCombat) excluded.Add(closed);
+            SpatialNode source = QueueDivert.PickupSource(fleet, pos, _world, _tuning, excluded);
+            if (source != null)
+            {
+                var lines = new List<string>();
+                bool ok = PendingFleetResolver.Retarget(st, fi, source.Id, PendingFleetResolver.FleetRetargetPolicy.KeepStop,
+                                                       _world, _tuning, lines, "traffic_divert");
+                foreach (string line in lines) _log.Write(line);
+                if (ok)
+                {
+                    _stationQueues.Remove(e.Key);
+                    _queueHeldAt.Remove(e.Key);
+                    to = source.Id;
+                    return true;
+                }
+            }
+
+            PendingFleetAction d = fleet;
+            d.EstimatedArrivalUtc = now;
+            d.ForcedRatio = 0.0;
+            d.ForcedRatioCause = PendingFleetResolver.QueueGiveUpCause;
+            st.PendingFleets[fi] = d;
+            _stationQueues.Remove(e.Key);
+            _queueHeldAt.Remove(e.Key);
+            if (DebugTraces.Admission)
+                _log.Write("TRAFFIC_GAVE_UP " + fleet.LogId + " " + fleet.ActorTag + " kind=" + fleet.Kind
+                           + " station=" + e.Station + " item=" + fleet.PickupItemKey
+                           + " waited=" + (now - e.JoinedUtc).TotalSeconds.ToString("F0", CultureInfo.InvariantCulture) + "s");
             return true;
         }
 

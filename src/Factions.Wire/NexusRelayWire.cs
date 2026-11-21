@@ -69,6 +69,14 @@ namespace Factions.Wire
         /// <summary>The authority's answer to a <see cref="HullAsk"/>. Steam id is the caller's; the
         /// payload is a gzipped Core <c>NexusHullAnswer</c>.</summary>
         HullAnswer = 15,
+
+        /// <summary>An agent's kit request: list the caller's waits, stamp a claim, or undo one. Steam
+        /// id is the caller's; the payload is a gzipped Core <c>NexusKitAsk</c>.</summary>
+        KitAsk = 16,
+
+        /// <summary>The authority's answer to a <see cref="KitAsk"/>. Steam id is the caller's; the
+        /// payload is a gzipped Core <c>NexusKitAnswer</c>.</summary>
+        KitAnswer = 17,
     }
 
     /// <summary>A chat command forwarded from an agent: the line as typed and who typed it, as the
@@ -131,7 +139,7 @@ namespace Factions.Wire
 
         /// <summary>The highest <see cref="RelayKind"/> this build reads. Raised with every kind added:
         /// a frame above it is refused on arrival.</summary>
-        public const RelayKind LastKind = RelayKind.HullAnswer;
+        public const RelayKind LastKind = RelayKind.KitAnswer;
 
         public static byte[] Write(RelayKind kind, byte homeServerId, ulong steamId, byte[] payload)
         {

@@ -154,7 +154,8 @@ namespace Factions.Core
         /// grid's own entity id.</param>
         /// <param name="nameIsOursForAnother"><see cref="IsSimBornName(string)"/> true while
         /// <paramref name="nameIsOursForThisGrid"/> is false — our prefix, someone else's id.</param>
-        /// <param name="npcSpawnedBit">SE's <c>IsNpcSpawnedGrid</c>, which its claim timer clears.</param>
+        /// <param name="npcSpawnedBit">SE's <c>IsNpcSpawnedGrid</c>. Does not decide the
+        /// verdict.</param>
         /// <param name="displayTagged"><see cref="IsTagged"/> on the display name.</param>
         public static BackfillVerdict ShouldBackfillName(bool nameIsOursForThisGrid,
                                                          bool nameIsOursForAnother,
@@ -166,7 +167,9 @@ namespace Factions.Core
             // both our name prefix AND our display tag, and is the one case where the tag is
             // actively misleading.
             if (nameIsOursForAnother) return BackfillVerdict.ForeignName;
-            if (npcSpawnedBit || displayTagged) return BackfillVerdict.Write;
+            // The bit is not admitted: SE sets it on every grid it spawns for an NPC, so a live
+            // contract target would be promoted to ours and closed by the next reap pass.
+            if (displayTagged) return BackfillVerdict.Write;
             return BackfillVerdict.NotOurs;
         }
 

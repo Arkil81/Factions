@@ -42,14 +42,28 @@ namespace Factions.Core.Tests
             Assert.Equal(ReapVerdict.NotSimBorn, GridReaping.Judge(c, Grace));
         }
 
-        /// <summary>The bit alone is enough: it survives a restart, and the "orphan survived two
-        /// restarts" class carries nothing else.</summary>
+        /// <summary>The bit alone is not ours. A vanilla Search contract spawns its target with
+        /// <c>SetNpcSpawnedGrid</c>, owned by the station faction's founder, held by no fleet and
+        /// carrying neither record nor name: reaping it left the player searching an empty GPS
+        /// sphere. Container drops, escort waves and encounters have the same shape.</summary>
         [Fact]
-        public void TheBitAloneIsSimBorn()
+        public void TheBitAloneIsNotSimBorn()
         {
             ReapCandidate c = Litter();
             c.Marked     = false;
             c.AgeSeconds = double.MaxValue;   // no record to date it
+            Assert.True(c.Bit);
+            Assert.Equal(ReapVerdict.NotSimBorn, GridReaping.Judge(c, Grace));
+        }
+
+        /// <summary>The bit beside a real carrier changes nothing: a marked hull still reaps.</summary>
+        [Fact]
+        public void TheBitBesideTheNameStillReaps()
+        {
+            ReapCandidate c = Litter();
+            c.Marked       = false;
+            c.NamedSimBorn = true;
+            c.AgeSeconds   = double.MaxValue;
             Assert.Equal(ReapVerdict.Reap, GridReaping.Judge(c, Grace));
         }
 

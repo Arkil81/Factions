@@ -25,9 +25,11 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
-        public void TheNpcBitAloneIsEnough()
+        public void TheNpcBitAloneIsNotEnough()
         {
-            Assert.Equal(V.Write, Decide(false, false, true, false));
+            // SE sets the bit on its own contract targets and container drops; promoting one to our
+            // name would let the next reap pass close a target a player is searching for.
+            Assert.Equal(V.NotOurs, Decide(false, false, true, false));
         }
 
         [Fact]

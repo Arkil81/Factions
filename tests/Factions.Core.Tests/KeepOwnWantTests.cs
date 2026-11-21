@@ -17,7 +17,7 @@ namespace Factions.Core.Tests
         {
             public bool HasPrefab(string prefabId) => true;
             public long CargoLiters(string prefabId) => 1_000_000;
-            public IReadOnlyDictionary<string, long> GasTankLiters(string prefabId) { return new Dictionary<string, long> { { "Gas:Hydrogen", 1_000_000 } }; }
+            public IReadOnlyDictionary<string, long> GasTankLiters(string prefabId) { return new Dictionary<string, long> { { "Gas:Hydrogen", 1_000_000 }, { "Gas:Oxygen", 1_000_000 } }; }
             public double Dps(string prefabId) => 0;
             public IReadOnlyList<string> RolesFor(string prefabId) => new[] { "Haul", "Trade", "Mine" };
             public double DryMassKg(string prefabId) => 0;
@@ -123,13 +123,14 @@ namespace Factions.Core.Tests
             Assert.Equal(900, haul.Cargo[Key]);
         }
 
-        /// <summary>Gas is never held back: on 2026-10-10 the reserve raised the share of fuel departures flew
-        /// without from 8% to 11%. Two nodes short of hydrogen still feed each other.</summary>
+        /// <summary>Fuel gas is never held back: on 2026-10-10 the reserve raised the share of fuel departures flew
+        /// without from 8% to 11%. Two nodes short of hydrogen the faction keeps as fuel still feed each other.</summary>
         [Fact]
-        public void TwoNodesShortOfAGas_StillFeedEachOther()
+        public void TwoNodesShortOfAFuelGas_StillFeedEachOther()
         {
             const string gas = "Gas:Hydrogen";
             var world = MakeWorld();
+            world.SetFuelReserveKeys("F", new[] { gas });
             SpatialNode a = AddNode(world, "A", 0, 0);
             AddNode(world, "B", 1, 0);
             a.Inventory[gas] = 900;
@@ -140,6 +141,38 @@ namespace Factions.Core.Tests
 
             PendingFleetAction haul = Assert.Single(Tick(world));
             Assert.Equal("B", haul.TargetNodeId);
+        }
+
+        /// <summary>A gas the faction does not keep as fuel is held back like an item. Live 2026-11-21:
+        /// every IGSL node posted a 4 M L oxygen row and read its whole stock as spare, so 73% of its
+        /// 92,843 hauls were oxygen and 65% of the volume came back on the same pair.</summary>
+        [Fact]
+        public void TwoNodesShortOfANonFuelGas_NeitherFeedsTheOther()
+        {
+            Assert.Empty(Tick(TwoShortOfGas("Gas:Oxygen", fuelKeys: new[] { "Gas:Hydrogen" })));
+        }
+
+        /// <summary>The discriminator: the same world, with oxygen named a fuel key, dispatches -- so the
+        /// empty result above is the reserve and not a setup that cannot haul gas.</summary>
+        [Fact]
+        public void TheSameGasNamedAsFuel_StillMoves()
+        {
+            PendingFleetAction haul = Assert.Single(Tick(TwoShortOfGas("Gas:Oxygen", fuelKeys: new[] { "Gas:Oxygen" })));
+            Assert.Equal("B", haul.TargetNodeId);
+        }
+
+        private static WorldModel TwoShortOfGas(string gas, string[] fuelKeys)
+        {
+            var world = MakeWorld();
+            world.SetFuelReserveKeys("F", fuelKeys);
+            SpatialNode a = AddNode(world, "A", 0, 0);
+            AddNode(world, "B", 1, 0);
+            a.Inventory[gas] = 900_000;     // a full tank, so the load gate passes it
+            world.Demand.Post(new DemandEntry { FactionTag = "F", Kind = "Item:" + gas, NodeId = "A", Quantity = 5_400_000,
+                                                ExpiresUtc = world.UtcNow.AddMinutes(5), Class = DemandClass.Catalog });
+            world.Demand.Post(new DemandEntry { FactionTag = "F", Kind = "Item:" + gas, NodeId = "B", Quantity = 2_700_000,
+                                                ExpiresUtc = world.UtcNow.AddMinutes(5), Class = DemandClass.Catalog });
+            return world;
         }
 
         [Theory]

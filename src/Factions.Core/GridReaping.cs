@@ -9,8 +9,10 @@ namespace Factions.Core
     {
         /// <summary>Close it.</summary>
         Reap,
-        /// <summary>Nothing in the group carries the record, the NPC-spawned bit or the entity name,
-        /// so it is not the simulation's to close. A player's grid lands here.</summary>
+        /// <summary>Nothing in the group carries the record or the entity name, so it is not the
+        /// simulation's to close. A player's grid lands here, and so does a grid SE spawned for
+        /// itself: a Search, Escort, Repair, Salvage or bounty contract's target, a container drop,
+        /// an encounter.</summary>
         NotSimBorn,
         /// <summary>A fleet still means to fly some grid in this group.</summary>
         Held,
@@ -39,9 +41,10 @@ namespace Factions.Core
         /// <summary>Some member carries this process's <see cref="SimGridRecord"/>.</summary>
         public bool Marked;
 
-        /// <summary>Some member carries <c>IsNpcSpawnedGrid</c>. Durable across a restart, but SE
-        /// owns it: <c>MyNPCGridClaimSessionComponent</c> clears it on any grid a non-NPC identity
-        /// owns once the claim timer expires, and a player clears it from the terminal.</summary>
+        /// <summary>Some member carries <c>IsNpcSpawnedGrid</c>. Not evidence the simulation spawned
+        /// it, and <see cref="GridReaping.Judge"/> does not read it: SE sets the same bit on every
+        /// grid it spawns for an NPC — contract targets, container drops, encounters — and every
+        /// grid this plugin marks also carries the entity name. Kept for the pass report.</summary>
         public bool Bit;
 
         /// <summary>Some member carries the <c>factions:npc:</c> entity name, or a record rebuilt
@@ -89,7 +92,7 @@ namespace Factions.Core
         /// unheld.</para></summary>
         public static ReapVerdict Judge(ReapCandidate c, double graceSeconds)
         {
-            if (!c.Marked && !c.Bit && !c.NamedSimBorn) return ReapVerdict.NotSimBorn;
+            if (!c.Marked && !c.NamedSimBorn) return ReapVerdict.NotSimBorn;
             if (c.Held)                  return ReapVerdict.Held;
             if (c.Station)               return ReapVerdict.Station;
             if (c.Respawn)               return ReapVerdict.Respawn;

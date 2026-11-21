@@ -1129,11 +1129,16 @@ namespace Factions.Core
             // this file already paid once for that exact mistake with DistanceTo (see the comment on
             // the candidates array further down); not repeating it for the new fields.
             var targets = new List<(string NodeId, long Shortfall, bool Hot, double History, double Urgency, DemandClass Class)>();
-            // Items only. Gas is left to move as before: live 2026-10-10, holding gas back raised the
-            // share of fuel departures flew without from 8% to 11%, because two nodes each keeping
-            // their own Fuel-class row no longer refilled whichever one departed next (FAC-211).
+            // Every key but a fuel gas. Fuel gas is left to move as before: live 2026-10-10, holding
+            // it back raised the share of fuel departures flown without from 8% to 11%, because two
+            // nodes each keeping their own Fuel-class row no longer refilled whichever one departed
+            // next (FAC-211). A gas the faction does not keep as fuel has no departure to starve, and
+            // exempting it too left every node a source and a destination of the same oxygen: live
+            // 2026-11-21, 73% of IGSL's 92,843 hauls were oxygen, 65% of its volume matched by a haul
+            // the other way on the same pair.
+            bool keepsFuel = FuelReserve.Keeps(world, factionTag, subTypeId, tuning);
             Dictionary<string, (long Quantity, DemandClass Class)> ownWant =
-                !InventoryKeyMapper.IsGasKey(subTypeId)
+                !(InventoryKeyMapper.IsGasKey(subTypeId) && keepsFuel)
                     ? new Dictionary<string, (long Quantity, DemandClass Class)>(StringComparer.Ordinal) : null;
             foreach (DemandEntry demand in demands)
             {
@@ -1180,7 +1185,6 @@ namespace Factions.Core
             var remaining = new Dictionary<string, long>();
             var surplusNodes = new List<SpatialNode>();
             int surplusNodeCount = 0;
-            bool keepsFuel = FuelReserve.Keeps(world, factionTag, subTypeId, tuning);
             // The part of a source's surplus its own row still wants, which only a destination of a
             // higher class may draw. Without it two nodes short of one key each read the other's
             // stock as surplus, and the row sizes decide which way it goes this cycle: live

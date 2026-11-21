@@ -209,6 +209,13 @@ namespace Factions
         /// <summary>Agent only: a <see cref="RelayKind.HullAnswer"/> with the caller's steam id.</summary>
         public Action<ulong, byte[]> HullAnswerReceived;
 
+        /// <summary>Authority only: a <see cref="RelayKind.KitAsk"/> with the sender's Nexus id and
+        /// the caller's steam id.</summary>
+        public Action<byte, ulong, byte[]> KitAskReceived;
+
+        /// <summary>Agent only: a <see cref="RelayKind.KitAnswer"/> with the caller's steam id.</summary>
+        public Action<ulong, byte[]> KitAnswerReceived;
+
         /// <summary>True once the player's client plugin has been granted a link.</summary>
         public bool IsLinked(ulong steamId)
         {
@@ -395,6 +402,11 @@ namespace Factions
                         Action<byte, ulong, byte[]> sink = HullAskReceived;
                         if (sink != null) sink(home, steamId, payload);
                     }
+                    else if (kind == RelayKind.KitAsk)
+                    {
+                        Action<byte, ulong, byte[]> sink = KitAskReceived;
+                        if (sink != null) sink(home, steamId, payload);
+                    }
                     else if (kind == RelayKind.Unlink)
                     {
                         LinkedClient client;
@@ -441,6 +453,12 @@ namespace Factions
                     if (kind == RelayKind.HullAnswer)
                     {
                         Action<ulong, byte[]> sink = HullAnswerReceived;
+                        if (sink != null) sink(steamId, payload);
+                        return;
+                    }
+                    if (kind == RelayKind.KitAnswer)
+                    {
+                        Action<ulong, byte[]> sink = KitAnswerReceived;
                         if (sink != null) sink(steamId, payload);
                         return;
                     }

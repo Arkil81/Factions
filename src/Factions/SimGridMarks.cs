@@ -181,10 +181,10 @@ namespace Factions
         ///
         /// <para><b>Distinct from <see cref="TryReadopt"/>.</b> That one rebuilds a record from a
         /// name the grid already has, and is safe to run unattended on every boot because the name
-        /// is a predicate. This one <i>creates</i> the name from evidence that is not — SE's
-        /// <c>IsNpcSpawnedGrid</c>, which its claim timer clears, or the <c>[NPC]</c> display tag,
-        /// which a player can type. So it is operator-driven and dry-run by default; it is never
-        /// called from a tick.</para>
+        /// is a predicate. This one <i>creates</i> the name from evidence that is not — the
+        /// <c>[NPC]</c> display tag, which a player can type. So it is operator-driven and dry-run
+        /// by default; it is never called from a tick. SE's <c>IsNpcSpawnedGrid</c> does not admit a
+        /// grid: SE sets it on its own contract targets and drops too.</para>
         ///
         /// <para>Marked <c>restored</c> for the same reason a readoption is: <c>MarkedUtc</c> would
         /// be this process's clock and dates nothing about a grid that has been in the world for

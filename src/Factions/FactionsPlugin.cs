@@ -116,6 +116,10 @@ namespace Factions
 
         private FactionRuntime _runtime;
         private DecisionLog _decisionLog;
+
+        /// <summary><c>!factions kit</c>; null on a dark server and before the session loads.</summary>
+        private KitService _kits;
+        internal KitService Kits { get { return _kits; } }
         private readonly FactionTuning _tuning = new FactionTuning();
         private Harmony _harmony;   // shared with the runtime (seed/floor/income knobs)
         private PrefabBookValueCache _prefabBookValues;
@@ -384,6 +388,10 @@ namespace Factions
                 string missileSpeedLine = MunitionSpeedManager.ApplyPersistedOverride(_tuning);
                 if (missileSpeedLine != null) Log.Info("Missile speed scale applied: " + missileSpeedLine);
 
+                // Every server generates contracts for its own stations, so before the Nexus gate too.
+                string searchAreaLine = SearchContractArea.Apply(_tuning);
+                if (searchAreaLine != null) Log.Info(searchAreaLine);
+
                 // One authority per Nexus cluster. Nexus replicates banking, faction, identity and
                 // reputation state across every member and applies an absolute balance on receipt,
                 // so a second simulating server is a second writer on the same NPC accounts.
@@ -442,6 +450,9 @@ namespace Factions
 
                 string decisionLogDir = Path.Combine(StorageDir, "logs");
                 _decisionLog = new DecisionLog(decisionLogDir);
+                _kits = new KitService(true, () => StorageDir, InstanceDir, null, null,
+                    line => { if (_decisionLog != null) _decisionLog.Write(line); });
+                _kits.Catalogue();   // writes the defaults out when absent, and logs the kit count
                 // Always logged, and it names the resolved path rather than the configured one.
                 // The decision log follows DataDirectory, so a redirect moves it and leaves the old
                 // Factions-<date>.log on disk, readable and frozen -- right name, right date,
@@ -833,6 +844,7 @@ namespace Factions
                     WingWorld.Relayed = _wingReadings;
                     _uplinkManager.WingCallReceived = OnWingCall;
                     _uplinkManager.HullAskReceived = OnHullAsk;
+                    _uplinkManager.KitAskReceived = OnKitAsk;
                     _runtime.CombatRelaySink = (o, sentence) =>
                         _combatRelay.Add(NexusCombatCall.From(o, sentence), DateTime.UtcNow);
                     _runtime.RemoteKillSink = QueueRemoteKill;
@@ -2038,6 +2050,7 @@ namespace Factions
                 _authorityOnline = false;
                 StartAgentChatCommands();
                 StartAgentHands();
+                StartAgentKits();
                 Log.Info("Factions agent: relaying client uplinks to Nexus server " + _tuning.NexusAuthorityServerId
                          + " (this is server " + _nexusServerId + "); serving GridSpeed locally; relay "
                          + _nexusRelay.Status());
@@ -2047,6 +2060,46 @@ namespace Factions
                 Log.Warn(ex, "Factions agent could not start; clients on this server have no uplink.");
                 _uplinkManager = null;
             }
+        }
+
+        /// <summary>Agent: kits are handed out here, to this server's characters, against the
+        /// authority's cooldowns.</summary>
+        private void StartAgentKits()
+        {
+            ChatManagerServer chat = Torch.CurrentSession != null
+                ? Torch.CurrentSession.Managers.GetManager<ChatManagerServer>() : null;
+            _kits = new KitService(false, () => _agentDataDir ?? InstanceDir, InstanceDir,
+                ask => _uplinkManager != null
+                       && _uplinkManager.ForwardFrame(Factions.Wire.RelayKind.KitAsk, ask.Steam, ask.Encode(), "kit"),
+                (steam, line) => { if (chat != null) chat.SendMessageAsOther("Factions", line, VRageMath.Color.CornflowerBlue, steam); },
+                line => { if (_decisionLog != null) _decisionLog.Write(line); });
+            _uplinkManager.KitAnswerReceived = (steamId, payload) =>
+            {
+                NexusKitAnswer answer;
+                if (!NexusKitAnswer.TryDecode(payload, out answer))
+                {
+                    Log.Warn("NEXUS_KIT_ANSWER_UNREADABLE bytes=" + (payload == null ? 0 : payload.Length));
+                    return;
+                }
+                KitService kits = _kits;
+                if (kits != null) kits.OnAnswer(answer);
+            };
+        }
+
+        /// <summary>Authority: an agent's kit ask, against this server's cooldown ledger.</summary>
+        private void OnKitAsk(byte home, ulong steamId, byte[] payload)
+        {
+            NexusKitAsk ask;
+            if (!NexusKitAsk.TryDecode(payload, out ask))
+            {
+                Log.Warn("NEXUS_KIT_ASK_UNREADABLE home=" + home + " bytes=" + (payload == null ? 0 : payload.Length));
+                return;
+            }
+            if (_kits == null || _nexusRelay == null) return;
+            if (steamId != 0) ask.Steam = steamId;
+            NexusKitAnswer answer = _kits.Answer(ask, DateTime.UtcNow);
+            _nexusRelay.TrySend(home, Factions.Wire.NexusRelayWire.Write(Factions.Wire.RelayKind.KitAnswer,
+                (byte)_nexusServerId, steamId, answer.Encode()));
         }
 
         /// <summary>Factions chat commands run on the cluster's authority for players connected
@@ -3318,6 +3371,7 @@ namespace Factions
             _relayTick++;
             if (_chatCommands != null && _relayTick % AgentPruneTicks == 0) _chatCommands.Tick(DateTime.UtcNow);
             if (_agentCaptures != null && _relayTick % AgentPruneTicks == 0) _agentCaptures.Tick(DateTime.UtcNow);
+            if (_kits != null && _relayTick % AgentPruneTicks == 0) _kits.Tick(DateTime.UtcNow);
             if (_agentWing != null)
             {
                 try { _agentWing.Tick(DateTime.UtcNow); }
@@ -3601,6 +3655,7 @@ namespace Factions
             _runtime = null;
             try { if (_decisionLog != null) _decisionLog.Dispose(); } catch { }
             _decisionLog = null;
+            _kits = null;
             _gpsHashes.Clear();
         }
 
@@ -6194,6 +6249,11 @@ namespace Factions
                 result = HandleCloseGrid(t);
                 return true;
             }
+            if (verb == "sitecheck")
+            {
+                result = HandleSiteCheck(t);
+                return true;
+            }
             if (verb == "hullprobe")
             {
                 result = HandleHullProbe(t);
@@ -8667,6 +8727,44 @@ namespace Factions
         /// belongs to a Factions node, so the record must survive for the node to materialise its
         /// own grid when a player next comes in range.</para>
         /// </summary>
+        /// <summary>Bridge verb 'factions sitecheck [apply] [nodeId]' -- see
+        /// <see cref="StationMaterializer.CheckSurfaceSites"/>. Runs on whichever materializer this
+        /// process has: the runtime's, or a Nexus agent's.</summary>
+        private string HandleSiteCheck(string[] t)
+        {
+            StationMaterializer stations = null;
+            SpatialGraph graph = null;
+            if (_runtime != null && _runtime.World != null)
+            {
+                stations = _runtime.StationsMaterializer;
+                graph = _runtime.World.Graph;
+            }
+            else if (_agentHands != null)
+            {
+                stations = _agentHands.Stations;
+                graph = _agentHands.Graph;
+            }
+            if (stations == null || graph == null) return "sitecheck: no station graph on this server yet.";
+
+            bool apply = t.Length > 2 && string.Equals(t[2], "apply", StringComparison.OrdinalIgnoreCase);
+            string onlyNodeId = null;
+            if (apply) { if (t.Length > 3) onlyNodeId = t[3]; }
+            else if (t.Length > 2) onlyNodeId = t[2];
+
+            StationSiteCheckResult r = stations.CheckSurfaceSites(graph, apply, onlyNodeId);
+            string header = "sitecheck: "
+                + (onlyNodeId != null ? "node=" + onlyNodeId + " " : "")
+                + "surface=" + r.Checked + " steep=" + r.Steep
+                + " worst=" + r.WorstGrade.ToString("0.00", CultureInfo.InvariantCulture)
+                + " limit=" + SurfaceSiteSearch.MaxGrade.ToString("0.00", CultureInfo.InvariantCulture)
+                + (apply ? " respawned=" + r.Respawned + " (applied)"
+                         : " (dry run -- add 'apply' to respawn the standing ones on level ground)");
+            if (apply && r.Respawned > 0)
+                Log.Info("sitecheck: respawned " + r.Respawned + " steep surface station(s) of " + r.Steep);
+            if (r.Details == null || r.Details.Count == 0) return header;
+            return header + " | " + string.Join(" | ", r.Details);
+        }
+
         private string HandleCloseGrid(string[] t)
         {
             if (t.Length < 3) return "closegrid: usage 'factions closegrid <entityId> [apply]'";

@@ -555,6 +555,22 @@ namespace Factions.Core
                             // duel's bracketed question instead of only the DPS-total one.
                             List<WeaponBand> offensiveDefenceBands =
                                 CombatStrength.NodeDefenceBands(target, world.PrefabCatalogue, tuning, targetStanding);
+                            // Plus the Guards the owner can still sail onto it once the raid is
+                            // seen. Without them a node with nothing parked or standing reads as
+                            // free, the gate below admits on defenceDps=0, and the raid flies into
+                            // the reinforcement MarshalDefence sends a minute later. Read with the
+                            // marshal's own walk, so both sides price one response.
+                            List<string> responseHulls = ProjectedGuardResponse(world, tuning, target, null);
+                            if (responseHulls.Count > 0)
+                            {
+                                List<WeaponBand> responseBands = new List<WeaponBand>();
+                                for (int ri = 0; ri < responseHulls.Count; ri++)
+                                    responseBands.AddRange(ShipPool.ConvoyWeaponBands(world.PrefabCatalogue, responseHulls[ri], 1));
+                                offensiveDefenceBands.AddRange(responseBands);
+                                offensiveDefenceDps += ShipPool.TotalDps(responseBands);
+                            }
+                            double responseDps = offensiveDefenceDps
+                                - CombatStrength.OfNodeDefence(target, world.PrefabCatalogue, tuning, targetStanding);
                             double offensiveTarget = 0;
                             if (tuning.RaidOverwhelmMargin > 0 && offensiveDefenceDps > 0)
                                 offensiveTarget = CombatStrength.DpsForDamage(
@@ -610,7 +626,7 @@ namespace Factions.Core
                                         // comfortable -- so the totals decide neither case, and a
                                         // ratio admitting on them admits every fight between itself
                                         // and the real bar.
-                                        DuelMatchup raidMatchup = RaidMatchup(world, states, target, candidate, st, tuning);
+                                        DuelMatchup raidMatchup = RaidMatchup(world, states, target, candidate, st, tuning, responseHulls);
                                         if (CombatStrength.Survives(offensiveDefenceBands, target, tuning,
                                                                     haveDps, tuning.RaidSurvivalMargin, raidMatchup))
                                             return true;
@@ -647,6 +663,7 @@ namespace Factions.Core
                                             + " targetTag=" + (target.OwnerFactionTag ?? "unknown")
                                             + " haveDps=" + refusedHaveDps.ToString("0", CultureInfo.InvariantCulture)
                                             + " defenceDps=" + offensiveDefenceDps.ToString("0", CultureInfo.InvariantCulture)
+                                            + " responseDps=" + responseDps.ToString("0", CultureInfo.InvariantCulture)
                                             + " duelDmg=" + CombatStrength.DuelDamage(offensiveDefenceBands, target, tuning,
                                                                 refusedMatchup).ToString("0", CultureInfo.InvariantCulture)
                                             + " surviveDmg=" + CombatStrength.DamageToDestroy(refusedHaveDps, tuning.RaidSurvivalMargin).ToString("0", CultureInfo.InvariantCulture)
@@ -1693,11 +1710,85 @@ namespace Factions.Core
         /// the parked hulls its defence can field and every Guard standing on it. A node with neither
         /// is a station and cannot move.</summary>
         private static DuelMatchup RaidMatchup(WorldModel world, IList<FactionState> states, SpatialNode target,
-            PendingFleetAction squadron, FactionState attacker, FactionTuning tuning)
+            PendingFleetAction squadron, FactionState attacker, FactionTuning tuning, List<string> responseHulls)
         {
             List<string> defenderHulls = NodeDefenceHulls(target, world.PrefabCatalogue, tuning, states, attacker.Tag);
+            if (responseHulls != null) defenderHulls.AddRange(responseHulls);
             return Matchup(world, target, squadron.WeaponBands, FleetMunitions.Hulls(squadron), attacker, attacker.Tag,
                            defenderHulls, FindState(states, target.OwnerFactionTag), target.OwnerFactionTag);
+        }
+
+        /// <summary>The hulls <paramref name="target"/>'s owner can still sail onto it once a raid is
+        /// seen: the parked, Guard-suitable, route-feasible stock of its other nodes, nearest first,
+        /// from every node whose transit clears both <see cref="FactionTuning.GuardResponseMaxTransitMinutes"/>
+        /// and <paramref name="deadline"/> -- the walk <see cref="MarshalDefence"/> makes, read without
+        /// drawing anything. The target's own parked stock is not included: the census already
+        /// prices it.
+        ///
+        /// <para>Bounded by <see cref="CombatStrength.FieldableHullCap"/> less what the target fields
+        /// itself, because both reach the fight through the same marshal and it sails at most that
+        /// many hulls against one threat.</para>
+        ///
+        /// <para>Bounded by the defender's treasury too: the marshal pays
+        /// <see cref="FactionTuning.GuardCost"/> per wave, so a defender that can afford fewer waves
+        /// than <see cref="CombatStrength.GuardMaxWaves"/> fields proportionally fewer hulls, and one
+        /// that cannot afford a wave fields none. Its spend-window budget is not read -- it moves
+        /// between now and the raid's detection, and the treasury is the bound that does not. Pact
+        /// partners' Guards are not priced.</para></summary>
+        public static List<string> ProjectedGuardResponse(WorldModel world, FactionTuning tuning,
+            SpatialNode target, DateTime? deadline)
+        {
+            var hulls = new List<string>();
+            if (world == null || tuning == null || target == null) return hulls;
+            string owner = target.OwnerFactionTag;
+            IPrefabCatalogue cat = world.PrefabCatalogue;
+            if (string.IsNullOrEmpty(owner) || cat == null) return hulls;
+
+            int maxWaves = CombatStrength.GuardMaxWaves(tuning);
+            if (tuning.GuardCost > 0)
+            {
+                long affordable = world.GetTreasury(owner) / tuning.GuardCost;
+                if (affordable < maxWaves) maxWaves = (int)Math.Max(0, affordable);
+            }
+            if (maxWaves <= 0) return hulls;
+            long cap = (long)maxWaves * CombatStrength.GuardWaveMaxHulls(tuning, 1.0);
+            int left = cap > int.MaxValue ? int.MaxValue : (int)cap;
+            List<KeyValuePair<string, int>> atTarget = CombatStrength.FieldableParkedStock(target, cat, tuning);
+            for (int i = 0; i < atTarget.Count; i++) left -= atTarget[i].Value;
+            if (left <= 0) return hulls;
+
+            var sources = new List<KeyValuePair<double, SpatialNode>>();
+            foreach (SpatialNode n in world.Graph.OwnedBy(owner))
+            {
+                if (n.Id == target.Id || n.ShipStock == null || n.ShipStock.Count == 0) continue;
+                double transitMins = tuning.FleetSpeedKmPerMin > 0
+                    ? tuning.TransitTimeMins(LegZoneProfile.FromEndpoints(world.Planets, tuning, n.Position, target.Position))
+                    : 0.0;
+                if (tuning.GuardResponseMaxTransitMinutes > 0 && transitMins > tuning.GuardResponseMaxTransitMinutes) continue;
+                if (deadline.HasValue && world.UtcNow.AddMinutes(transitMins) > deadline.Value) continue;
+                sources.Add(new KeyValuePair<double, SpatialNode>(n.Position.DistanceTo(target.Position), n));
+            }
+            sources.Sort((a, b) =>
+            {
+                int c = a.Key.CompareTo(b.Key);
+                return c != 0 ? c : string.CompareOrdinal(a.Value.Id, b.Value.Id);
+            });
+
+            for (int s = 0; s < sources.Count && left > 0; s++)
+            {
+                SpatialNode origin = sources[s].Value;
+                ShipPool.RouteEnvironment route = ShipPool.RouteEnvironment.From(
+                    world.Planets, origin.Position, target.Position, tuning.MinDryTwr);
+                List<KeyValuePair<string, int>> stock = CombatStrength.FieldableParkedStock(origin, cat, tuning);
+                for (int i = 0; i < stock.Count && left > 0; i++)
+                {
+                    if (!ShipPool.IsRouteFeasible(cat, stock[i].Key, route)) continue;
+                    int take = Math.Min(stock[i].Value, left);
+                    for (int k = 0; k < take; k++) hulls.Add(stock[i].Key);
+                    left -= take;
+                }
+            }
+            return hulls;
         }
 
         /// <summary>The matchup a Guard commit predicts with: <paramref name="threat"/> against this

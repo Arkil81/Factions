@@ -57,6 +57,12 @@ namespace Factions.Core
 
         /// <summary>Seconds an area stays quiet after a bot from it is killed.</summary>
         public double? KillDelaySeconds;
+
+        /// <summary>One wave per area per night: once a wave of this rule spawns, later waves of it
+        /// within <see cref="FaunaNightGate.RadiusM"/> are refused for half the world's day. See
+        /// <see cref="FaunaNightGate"/>. False keeps SE's own cadence, a wave every
+        /// <see cref="DelaySeconds"/> for as long as a player stays.</summary>
+        public bool OncePerNight;
     }
 
     /// <summary>The facts about a spawn site a rule is matched against. Gathered by the host at the

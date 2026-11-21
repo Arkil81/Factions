@@ -223,7 +223,8 @@ namespace Factions.Core
             return cause == "grid_destroyed" || cause == "grid_captured"
                 || cause == "grid_stalled"   || cause == DisabledHull.Cause
                 || cause == "spawn_dedup"
-                || cause == SiblingDismissCause;
+                || cause == SiblingDismissCause
+                || cause == QueueGiveUpCause;
         }
 
         /// <summary>The ratio a fleet whose grid left the world with no grid deciding it -- a stall
@@ -450,7 +451,12 @@ namespace Factions.Core
             /// <summary>The new node is spliced in ahead of the current destination, which is
             /// requeued behind it. For a fleet whose current destination is owed something: a Haul
             /// with cargo committed against a delivery still has to make that delivery.</summary>
-            Divert
+            Divert,
+            /// <summary>The new node replaces the current destination, and the current stop goes
+            /// there as it is: its kind, its pickup payload and the fleet's target tag are kept.
+            /// For a Pickup collected from another node of the same owner
+            /// (<see cref="QueueDivert.PickupSource"/>).</summary>
+            KeepStop
         }
 
         /// <summary>
@@ -509,16 +515,19 @@ namespace Factions.Core
 
             fleet.OriginPosKm = resumeFrom;
             fleet.TargetNodeId = newTarget.Id;
-            fleet.TargetTag = newTarget.OwnerFactionTag;
             fleet.TargetPosKm = newTarget.Position;
-            fleet.CurrentStopKind = FleetStopKind.Service;
             fleet.RemainingStops = stops.Count > 0 ? stops : null;
-            // The pickup/mine payloads belong to the stop that was current a moment ago. Divert
-            // requeued that stop with them attached; Replace dropped it, and they go with it.
-            fleet.PickupItemKey = null;
-            fleet.PickupQuantity = 0;
-            fleet.MineWeights = null;
-            fleet.MineTargetLiters = 0;
+            if (policy != FleetRetargetPolicy.KeepStop)
+            {
+                fleet.TargetTag = newTarget.OwnerFactionTag;
+                fleet.CurrentStopKind = FleetStopKind.Service;
+                // The pickup/mine payloads belong to the stop that was current a moment ago. Divert
+                // requeued that stop with them attached; Replace dropped it, and they go with it.
+                fleet.PickupItemKey = null;
+                fleet.PickupQuantity = 0;
+                fleet.MineWeights = null;
+                fleet.MineTargetLiters = 0;
+            }
             // The old graph path and clearance profile both describe a journey that is no longer
             // being flown. Nulling PathNodeIds costs this leg its mid-transit encounter checks
             // (ResolveMidTransitMeetings needs waypoints); PlanFleetLeg below re-plans clearance.
@@ -3449,6 +3458,12 @@ namespace Factions.Core
         /// entry it dismissed as a duplicate of another. Resolved by <see cref="RecallToOrigin"/>.</summary>
         public const string SiblingDismissCause = "sibling_dismiss";
 
+        /// <summary>The <see cref="PendingFleetAction.ForcedRatioCause"/> the host writes on a Pickup
+        /// arrival that waited out its station queue with no other node to collect from. Resolved by
+        /// <see cref="RecallToOrigin"/>, like a dismissed duplicate: the errand is given up, the hull
+        /// and whatever it already carries go home.</summary>
+        public const string QueueGiveUpCause = "traffic_give_up";
+
         /// <summary>Ends a dismissed duplicate without its mission: every hull it drew lands back at
         /// its origin (or, when the faction no longer owns that, wherever <see cref="ShipPool.ResolveLanding"/>
         /// sends it) and whatever its hold carries is unloaded at the same node. Nothing about the
@@ -4198,7 +4213,7 @@ namespace Factions.Core
 
             // A duplicate the host dismissed never flies its mission. Ahead of the activity credit
             // and the per-stop handling: it reached no stop, and its hull and hold go home as they are.
-            if (fleet.ForcedRatioCause == SiblingDismissCause)
+            if (fleet.ForcedRatioCause == SiblingDismissCause || fleet.ForcedRatioCause == QueueGiveUpCause)
             {
                 RecallToOrigin(ref fleet, world, log);
                 fleet.Resolved = true;

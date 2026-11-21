@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using HarmonyLib;                       // AccessTools
 using Sandbox.Common.ObjectBuilders;   // SpawningOptions
@@ -40,6 +41,16 @@ namespace Factions
         public int Fixed;
         public int Skipped;          // drifted further than any ordinary reposition could account for
         public double WorstDriftM;
+        public List<string> Details;
+    }
+
+    /// <summary>Summary returned by <see cref="StationMaterializer.CheckSurfaceSites"/>.</summary>
+    public struct StationSiteCheckResult
+    {
+        public int Checked;          // surface stations measured
+        public int Steep;            // over SurfaceSiteSearch.MaxGrade
+        public int Respawned;        // steep and standing, respawned by 'apply'
+        public double WorstGrade;
         public List<string> Details;
     }
 
@@ -90,6 +101,17 @@ namespace Factions
         // leaves this fraction embedded, whatever the prefab's shape.
         private const double StationEmbedFraction = 0.10;
         private const double StationEmbedFloorM   = 0.25;   // vanilla's own fixed embed, used as a floor
+
+        // Footprint reach used by the surface-slope search when the prefab cannot be measured. The
+        // 150 m clearance fallback above is sized to a safe zone and would make every unmeasured
+        // design read as standing on a mountainside.
+        private const double UnmeasuredFootprintReachM = 30.0;
+
+        // A surface station is snapped to terrain when it is within this distance of the surface.
+        private const double SurfaceSnapRangeM = 2000.0;
+
+        // Cap on per-node lines in a sitecheck report, for the same reason as MaxDriftDetails.
+        private const int MaxSiteDetails = 20;
 
         // Cap on per-node lines in a FixNodeStationDrift report -- the bridge/chat result is a single
         // string, and a whole-map sweep can legitimately flag many nodes at once.
@@ -505,6 +527,21 @@ namespace Factions
         // Cleared when the node finally spawns, so a recurrence is reported again.
         private readonly Dictionary<string, string> _declineReason = new Dictionary<string, string>();
 
+        /// <summary>Where a surface station on steep ground actually stands, per node, for this
+        /// session. Never persisted: the station record and the node keep the original site, so the
+        /// drift heal has nothing to undo, and the deterministic search lands the station in the same
+        /// place on every spawn. Keyed on the record's position so a moved record is measured again.</summary>
+        private readonly Dictionary<string, SurfaceSite> _surfaceSites = new Dictionary<string, SurfaceSite>();
+
+        private struct SurfaceSite
+        {
+            public Vector3D Recorded;     // the station record's position this was measured from
+            public string Prefab;
+            public Vector3D Position;     // where the grid origin goes
+            public Vector3 Up, Forward;
+            public SurfaceSiteChoice Choice;
+        }
+
         /// <summary>
         /// Reports, once per change, that <see cref="BeginSpawn"/> looked at a node and did not spawn
         /// it. Exists because every one of those paths used to return in silence, which made the
@@ -836,7 +873,7 @@ namespace Factions
                 {
                     Vector3D surfPoint = nearPlanet.GetClosestSurfacePointGlobal(stPos);
                     double distToSurf = (stPos - surfPoint).Length();
-                    if (distToSurf < 2000.0) // within 2 km of surface
+                    if (distToSurf < SurfaceSnapRangeM)
                     {
                         surfaceSnapped = true;
                         MatrixD surfMatrix = nearPlanet.GetSurfacePlacementMatrix(surfPoint);
@@ -872,6 +909,34 @@ namespace Factions
                         // (ours or vanilla's) uses it, and it survives into the world save.
                         if (StationSetPosition != null)
                             StationSetPosition.Invoke(concrete, new object[] { stPos, stUp, stForward });
+
+                        // Steep ground: this spawn stands on the nearest level-enough site instead
+                        // (SurfaceSiteSearch). Deliberately after the persist above and applied only
+                        // to the locals, like the obstruction bump below: the record and the node
+                        // keep the original site, and the same search answers the same way next time.
+                        SurfaceSite site = SurfaceSiteFor(nodeId, nearPlanet, stPos, surfPoint,
+                            prefabName, prefabBox, liftAlongUp);
+                        if (site.Choice.Moved)
+                        {
+                            stPos     = site.Position;
+                            stUp      = site.Up;
+                            stForward = site.Forward;
+                            FactionsPlugin.Log.Info("StationMaterializer: moved " + factionTag
+                                + " station #" + stableId + " (node=" + nodeId + ") "
+                                + Math.Round(site.Choice.DistanceM) + " m off steep ground, grade "
+                                + site.Choice.OriginalGrade.ToString("0.00", CultureInfo.InvariantCulture) + " -> "
+                                + site.Choice.Grade.ToString("0.00", CultureInfo.InvariantCulture)
+                                + (site.Choice.Level ? "" : " (best found, still steep)")
+                                + " (not persisted).");
+                        }
+                        else if (!site.Choice.Level)
+                        {
+                            FactionsPlugin.Log.Warn("StationMaterializer: " + factionTag + " station #" + stableId
+                                + " (node=" + nodeId + ") stands on grade "
+                                + site.Choice.OriginalGrade.ToString("0.00", CultureInfo.InvariantCulture)
+                                + " and nothing within " + Math.Round(SurfaceSiteSearch.MaxMoveM(site.Choice.ReachM))
+                                + " m is better -- spawning on the node regardless.");
+                        }
                     }
                 }
 
@@ -1566,6 +1631,141 @@ namespace Factions
             return gravityStrength > 0f && pull.LengthSquared() > 0f;
         }
 
+        /// <summary>The footprint's horizontal half-diagonal: local X and Z are the horizontal axes
+        /// once a surface station stands (grid-local Y maps to world up, see the embed lift).</summary>
+        private static double FootprintReachM(BoundingBox? box)
+        {
+            if (!box.HasValue) return UnmeasuredFootprintReachM;
+            double x = Math.Max(Math.Abs((double)box.Value.Min.X), Math.Abs((double)box.Value.Max.X));
+            double z = Math.Max(Math.Abs((double)box.Value.Min.Z), Math.Abs((double)box.Value.Max.Z));
+            double reach = Math.Sqrt(x * x + z * z);
+            return reach > 1.0 ? reach : UnmeasuredFootprintReachM;
+        }
+
+        /// <summary>Terrain altitude (distance from the planet's centre, metres) at an east/north
+        /// offset on the tangent plane through <paramref name="surfPoint"/>.</summary>
+        private static Func<double, double, double> AltitudeSampler(MyPlanet planet, Vector3D surfPoint,
+                                                                    out Vector3D east, out Vector3D north)
+        {
+            Vector3D centre = planet.PositionComp.WorldVolume.Center;
+            Vector3D radial = Vector3D.Normalize(surfPoint - centre);
+            Vector3D e = Vector3D.CalculatePerpendicularVector(radial);
+            Vector3D n = Vector3D.Cross(radial, e);
+            east = e;
+            north = n;
+            return (de, dn) => (planet.GetClosestSurfacePointGlobal(surfPoint + e * de + n * dn) - centre).Length();
+        }
+
+        /// <summary>Where this spawn of a surface station stands: the snapped site itself, or the
+        /// nearest level-enough one (<see cref="SurfaceSiteSearch"/>). Measured once per node per
+        /// session and reused while the record and the design are unchanged.</summary>
+        private SurfaceSite SurfaceSiteFor(string nodeId, MyPlanet planet, Vector3D recorded, Vector3D surfPoint,
+                                           string prefabName, BoundingBox? prefabBox, double liftAlongUp)
+        {
+            SurfaceSite cached;
+            if (_surfaceSites.TryGetValue(nodeId, out cached)
+                && string.Equals(cached.Prefab, prefabName, StringComparison.Ordinal)
+                && Vector3D.DistanceSquared(cached.Recorded, recorded) < 1.0)
+                return cached;
+
+            Vector3D east, north;
+            Func<double, double, double> altitude = AltitudeSampler(planet, surfPoint, out east, out north);
+            SurfaceSiteChoice choice = SurfaceSiteSearch.Choose(altitude, FootprintReachM(prefabBox));
+
+            var site = new SurfaceSite { Recorded = recorded, Prefab = prefabName, Choice = choice, Position = recorded };
+            if (choice.Moved)
+            {
+                Vector3D ground = planet.GetClosestSurfacePointGlobal(surfPoint + east * choice.EastM + north * choice.NorthM);
+                MatrixD frame = planet.GetSurfacePlacementMatrix(ground);
+                site.Up = (Vector3)frame.Up;
+                site.Forward = (Vector3)frame.Forward;
+                site.Position = ground + frame.Up * liftAlongUp;
+            }
+            _surfaceSites[nodeId] = site;
+            return site;
+        }
+
+        /// <summary>
+        /// Bridge verb <c>factions sitecheck [apply] [nodeId]</c>: measures the ground under every
+        /// surface station this process can see against SE's installation slope limit
+        /// (<see cref="SurfaceSiteSearch.MaxGrade"/>) and lists the steep ones, steepest first. With
+        /// a node id the full search runs too and the report says where the station would move.
+        /// <c>apply</c> respawns each steep station that is standing, so it comes back on level
+        /// ground; one that is not standing is moved on its next spawn without being asked.
+        /// </summary>
+        public StationSiteCheckResult CheckSurfaceSites(SpatialGraph graph, bool apply, string onlyNodeId = null)
+        {
+            var result = new StationSiteCheckResult { Details = new List<string>() };
+            if (MySession.Static == null || graph == null) return result;
+
+            var steep = new List<KeyValuePair<double, string>>();
+            foreach (SpatialNode node in graph.Nodes.Values)
+            {
+                if (node == null || node.StableStationId == 0 || node.OwnerFactionTag == null) continue;
+                if (onlyNodeId != null && !string.Equals(node.Id, onlyNodeId, StringComparison.OrdinalIgnoreCase)) continue;
+
+                MyFaction faction = FindFaction(node.OwnerFactionTag);
+                MyFactionStation concrete = faction != null
+                    ? faction.GetStationById(node.StableStationId) as MyFactionStation
+                    : null;
+                if (concrete == null) continue;
+
+                Vector3D pos = concrete.Position;
+                MyPlanet planet = MyGamePruningStructure.GetClosestPlanet(pos);
+                if (planet == null) continue;
+                Vector3D surf = planet.GetClosestSurfacePointGlobal(pos);
+                if ((pos - surf).Length() >= SurfaceSnapRangeM) continue;
+                result.Checked++;
+
+                MyObjectBuilder_CubeGrid[] customGrids =
+                    CustomStationGrids != null && !string.IsNullOrEmpty(node.StationPrefabId)
+                        ? CustomStationGrids(node.StationPrefabId)
+                        : null;
+                double reach = FootprintReachM(MeasurePrefabBox(customGrids, concrete.PrefabName));
+                Vector3D east, north;
+                Func<double, double, double> altitude = AltitudeSampler(planet, surf, out east, out north);
+                double rise;
+                double grade = SurfaceSiteSearch.GradeAtNode(altitude, reach, out rise);
+                if (grade > result.WorstGrade) result.WorstGrade = grade;
+                if (grade <= SurfaceSiteSearch.MaxGrade) continue;
+                result.Steep++;
+
+                MyCubeGrid live;
+                bool standing = concrete.StationEntityId != 0
+                    && MyEntities.TryGetEntityById(concrete.StationEntityId, out live, false)
+                    && !live.MarkedForClose;
+                string line = node.OwnerFactionTag + " #" + node.StableStationId + " " + node.Id
+                    + " (" + (concrete.Name ?? node.DisplayName) + "): grade "
+                    + grade.ToString("0.00", CultureInfo.InvariantCulture)
+                    + " (" + Math.Round(rise) + " m over " + Math.Round(reach) + " m)"
+                    + (standing ? ", standing grid " + concrete.StationEntityId : ", not standing");
+
+                if (onlyNodeId != null)
+                {
+                    SurfaceSiteChoice choice = SurfaceSiteSearch.Choose(altitude, reach);
+                    line += choice.Moved
+                        ? " -> moves " + Math.Round(choice.DistanceM) + " m to grade "
+                          + choice.Grade.ToString("0.00", CultureInfo.InvariantCulture)
+                          + (choice.Level ? "" : " (best found, still steep)")
+                        : " -> nothing better within " + Math.Round(SurfaceSiteSearch.MaxMoveM(reach)) + " m";
+                }
+
+                if (apply && standing)
+                {
+                    _surfaceSites.Remove(node.Id);
+                    ForceRespawn(graph, node.OwnerFactionTag, node.Id);
+                    result.Respawned++;
+                    line += " -> respawned";
+                }
+                steep.Add(new KeyValuePair<double, string>(grade, line));
+            }
+
+            steep.Sort((a, b) => b.Key.CompareTo(a.Key));
+            for (int i = 0; i < steep.Count && i < MaxSiteDetails; i++) result.Details.Add(steep[i].Value);
+            if (steep.Count > MaxSiteDetails) result.Details.Add("... " + (steep.Count - MaxSiteDetails) + " more");
+            return result;
+        }
+
         /// <summary>The station design's own local bounding box, or null when it cannot be measured.
         /// A capture is not an SE prefab definition, so SE cannot measure it; its box is solved from
         /// the design's own block coordinates instead -- same grid-local frame either way.</summary>
@@ -1630,6 +1830,15 @@ namespace Factions
                 ? StationTarget(node)
                 : recorded;
             stationUp = concrete.Up;
+
+            // A surface station on steep ground spawns where SurfaceSiteFor put it last time.
+            SurfaceSite site;
+            if (_surfaceSites.TryGetValue(node.Id, out site) && site.Choice.Moved
+                && Vector3D.DistanceSquared(site.Recorded, stationPos) < 1.0)
+            {
+                stationPos = site.Position;
+                stationUp = site.Up;
+            }
 
             MyObjectBuilder_CubeGrid[] customGrids =
                 CustomStationGrids != null && !string.IsNullOrEmpty(node.StationPrefabId)

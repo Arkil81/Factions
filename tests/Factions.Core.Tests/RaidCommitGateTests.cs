@@ -240,6 +240,96 @@ namespace Factions.Core.Tests
             Assert.Single(st.PendingFleets);
         }
 
+        // ---- the reinforcement the owner sends once the raid is seen -----------------------------
+
+        /// <summary>A node with nothing parked and nothing standing is not undefended when its owner
+        /// holds warships a short hop away: the marshal sails them onto it as soon as the raid is
+        /// detected. Live 2026-11-21: 145 FCTM raids on IGSL, 84 destroyed by the Guard IGSL sent a
+        /// minute after a gate that read defenceDps=0 had admitted them.</summary>
+        [Fact]
+        public void ARaidOnANodeTheOwnerCanReinforce_IsRefused()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            origin.ShipStock["Fighter"] = 1;
+            SpatialNode depot = Depot(world, target, offsetKm: 1, hulls: 30);
+            world.SetTreasury("B", 10_000_000);
+            Assert.True(world.Tuning.TransitTimeMins(1) <= world.Tuning.GuardResponseMaxTransitMinutes);
+
+            var log = new List<string>();
+            new FleetManager().Tick(new List<FactionState> { st }, world, world.Tuning, log);
+
+            Assert.Empty(st.PendingFleets);
+            Assert.Contains(log, l => l.Contains("RAID_REFUSED") && l.Contains("responseDps=30000"));
+            Assert.Equal(30, depot.ShipStock["Fighter"]);      // read, never drawn
+        }
+
+        /// <summary>The control: the same depot beyond the response cap cannot arrive in time, so the
+        /// marshal never sends it and the raid flies. Without this arm the test above passes on a
+        /// gate that prices every owned hull in the world.</summary>
+        [Fact]
+        public void AReinforcementThatCannotArriveInTime_IsNotPriced()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            origin.ShipStock["Fighter"] = 1;
+            double farKm = 1;
+            while (world.Tuning.TransitTimeMins(farKm) <= world.Tuning.GuardResponseMaxTransitMinutes) farKm *= 2;
+            Depot(world, target, offsetKm: farKm, hulls: 30);
+            world.SetTreasury("B", 10_000_000);
+
+            var log = new List<string>();
+            new FleetManager().Tick(new List<FactionState> { st }, world, world.Tuning, log);
+
+            Assert.Single(st.PendingFleets);
+            Assert.DoesNotContain(log, l => l.Contains("RAID_REFUSED"));
+        }
+
+        /// <summary>The other control: a defender that cannot pay for a wave sends none, so its
+        /// warships are not a response either.</summary>
+        [Fact]
+        public void AReinforcementTheOwnerCannotAfford_IsNotPriced()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            origin.ShipStock["Fighter"] = 1;
+            Depot(world, target, offsetKm: 1, hulls: 30);
+            world.Tuning.GuardCost = 1000;
+            world.SetTreasury("B", 999);
+
+            var log = new List<string>();
+            new FleetManager().Tick(new List<FactionState> { st }, world, world.Tuning, log);
+
+            Assert.Single(st.PendingFleets);
+            Assert.DoesNotContain(log, l => l.Contains("RAID_REFUSED"));
+        }
+
+        /// <summary>The response is bounded by what the marshal can sail against one threat:
+        /// <see cref="CombatStrength.FieldableHullCap"/> hulls, however many are parked nearby.</summary>
+        [Fact]
+        public void TheProjectedResponse_IsCappedAtWhatTheMarshalCanSail()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            Depot(world, target, offsetKm: 1, hulls: 10000);
+            world.SetTreasury("B", 10_000_000);
+
+            List<string> response = FleetManager.ProjectedGuardResponse(world, world.Tuning, target, null);
+
+            Assert.Equal(CombatStrength.FieldableHullCap(world.Tuning), response.Count);
+        }
+
+        /// <summary>A second node of <paramref name="target"/>'s owner, <paramref name="offsetKm"/>
+        /// away, with <paramref name="hulls"/> Fighters parked.</summary>
+        private static SpatialNode Depot(WorldModel world, SpatialNode target, double offsetKm, int hulls)
+        {
+            SpatialNode depot = world.Graph.Add(
+                new Vec3(target.Position.X, target.Position.Y + offsetKm, target.Position.Z), 0.6, "DEPOT");
+            depot.OwnerFactionTag = target.OwnerFactionTag; depot.HoldStrength = 1.0; depot.Radius = 40;
+            depot.ShipStock["Fighter"] = hulls;
+            return depot;
+        }
+
         /// <summary>One faction holding <paramref name="node"/> with a Guard committed to it — what
         /// <c>FleetManager</c>'s cross-faction guarded-strength index reads.</summary>
         private static FactionState GarrisonedBy(string tag, SpatialNode node, double dps, double rangeM, bool intercepted)

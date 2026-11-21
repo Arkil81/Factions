@@ -235,6 +235,22 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
+        public void ShippedRecipe_TellusWolvesComeOncePerNight()
+        {
+            string error;
+            WorldRecipe r = WorldRecipe.Parse(System.IO.File.ReadAllText(
+                TestSupport.RepoFile("instance/worlds/awl-factions-genesis/world_recipe.json")), out error);
+            Assert.True(r != null, error);
+            FaunaRule wolves = null;
+            foreach (RecipePlanet planet in r.Planets)
+                if (planet.Name == "Tellus" && planet.Fauna != null)
+                    foreach (FaunaRule rule in planet.Fauna)
+                        if (rule.Animals.Contains("Wolf")) wolves = rule;
+            Assert.NotNull(wolves);
+            Assert.True(wolves.OncePerNight);
+        }
+
+        [Fact]
         public void FaunaWithoutDefinition_IsRejected()
         {
             RecipePlanet p = Body("Tellus", Rule("Cow_Bot"));

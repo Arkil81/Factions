@@ -44,6 +44,9 @@ namespace Factions
             "factions debug", "factions reload",
             // Captures read the grid the player looks at, which only the agent holds.
             "factions livery capture", "factions ship capture", "factions station scan",
+            // The items go to the character the player has here; the cooldowns are asked of the
+            // authority by KitService itself.
+            "factions kit",
         };
 
         private static readonly Regex ArgSplit = new Regex("(\"[^\"]+\"|\\S+)");

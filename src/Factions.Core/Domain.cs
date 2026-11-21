@@ -4953,6 +4953,12 @@ namespace Factions.Core
         /// <see cref="MunitionSpeedPolicy"/>.</para></summary>
         public double MissileSpeedScale = MunitionSpeedPolicy.NoScale;
 
+        /// <summary>Search area of SE's vanilla Search contract, metres: how far from the target its
+        /// GPS marker may land. Written onto the loaded <c>Find</c> <c>MyContractTypeFindDefinition</c> at
+        /// session load (<see cref="SearchContractPolicy"/>). <see cref="SearchContractPolicy.NoOverride"/>
+        /// (0) leaves the loaded definition alone; vanilla content says 3000.</summary>
+        public double SearchContractAreaM = SearchContractPolicy.DefaultAreaM;
+
         public double FleetSpeedKmPerMin;     // cruise (max) speed, and the DeepSpace tier's cap
         public double FleetSpeedMinKmPerMin;  // departure/arrival speed, and the Gravity tier's cap; overridden at session load from SE LargeShipMaxSpeed
         /// <summary>Cap inside an authored <see cref="NodeZone.Orbit"/> region that is not itself in

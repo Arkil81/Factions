@@ -18,7 +18,7 @@ namespace Factions
     {
         public bool Applied;
         public int  GridsSeen;      // cube grids walked
-        public int  SimBornGroups;  // mechanical groups carrying the record, the bit or the name
+        public int  SimBornGroups;  // mechanical groups carrying the record or the name
         public int  Reaped;         // grids closed, or that would have been
         public int  Blocks;
         public int  Readopted;      // records rebuilt from the grid's entity name after a restart
@@ -118,12 +118,16 @@ namespace Factions
     /// <para><b>It walks the world, not the ledger.</b> The fleet engine knows the ids it spawned;
     /// it does not know the rotor-mounted turret a prefab carried, the piece a hull shed in a fight,
     /// or anything at all after a restart, because the <see cref="SimGridRegistry"/> record is
-    /// per-process. What survives a restart is on the grid itself: <c>IsNpcSpawnedGrid</c>, which SE
-    /// clears once a non-NPC identity has owned the grid for <c>NPCGridClaimTimeLimit</c>, and the
-    /// <c>factions:npc:</c> entity name, which SE never touches. So the pass starts from every grid
-    /// in the world, rebuilds the record of every grid carrying the name
-    /// (<see cref="SimGridMarks.TryReadopt"/>), and asks each one whether anything still holds it.
-    /// That is also what closes the "orphan survived two restarts" class the boot pass exists for.</para>
+    /// per-process. What survives a restart is on the grid itself: the <c>factions:npc:</c> entity
+    /// name, which SE never touches. So the pass starts from every grid in the world, rebuilds the
+    /// record of every grid carrying the name (<see cref="SimGridMarks.TryReadopt"/>), and asks each
+    /// one whether anything still holds it. That is also what closes the "orphan survived two
+    /// restarts" class the boot pass exists for.</para>
+    ///
+    /// <para><b><c>IsNpcSpawnedGrid</c> is not a carrier.</b> SE sets it on every grid it spawns for
+    /// an NPC identity — a Search or Repair contract's target, an escort and its attack waves, a
+    /// container drop, an encounter — none of which any fleet holds, so reading it as ours closes a
+    /// contract's target within one pass of the player accepting it.</para>
     ///
     /// <para><b>The mechanical group is the unit.</b> Judging grids one at a time would reap the
     /// turrets off a hull a fleet is still flying — only the lead's id is in
@@ -293,8 +297,7 @@ namespace Factions
         ///
         /// <para><b>Why this is operator-driven and not a boot pass.</b> <see cref="SimGridMarks"/>'s
         /// readoption runs unattended because it reads a name that is already a predicate. This
-        /// promotes evidence that is not one — SE's claim-clearable bit, or a display tag a player
-        /// can type — so the list is shown before anything is written. What a wrongly promoted grid
+        /// promotes evidence that is not one — a display tag a player can type — so the list is shown before anything is written. What a wrongly promoted grid
         /// then faces is the reaper's own refusals (held, station, player-owned, grace), not
         /// deletion.</para>
         ///
@@ -519,10 +522,10 @@ namespace Factions
                 if (bit)   c.Bit = true;
                 if (named) c.NamedSimBorn = true;
 
-                // The ownership guard is on the members carrying none of the three carriers: a
-                // sim-born grid is ours whatever its BigOwners says, because a player faction's
-                // convoy spawns owned by the player's own identity.
-                if (!hasRecord && !bit && !named && TouchesPlayerProperty(players, member))
+                // The ownership guard is on the members carrying neither carrier: a sim-born grid
+                // is ours whatever its BigOwners says, because a player faction's convoy spawns
+                // owned by the player's own identity.
+                if (!hasRecord && !named && TouchesPlayerProperty(players, member))
                     c.UnmarkedPlayerOwned = true;
 
                 if (_isHeld != null && _isHeld(member.EntityId)) c.Held = true;
@@ -709,7 +712,7 @@ namespace Factions
             return "eid=" + root.EntityId + " \"" + name + "\""
                  + " blocks=" + c.Blocks
                  + (group.Count > 1 ? " grids=" + group.Count : "")
-                 + (c.Marked ? " marked" : c.Bit ? " bit" : " name")
+                 + (c.Marked ? " marked" : " name")
                  + (c.AgeSeconds >= double.MaxValue ? " age=unknown"
                     : " age=" + c.AgeSeconds.ToString("F0", CultureInfo.InvariantCulture) + "s")
                  + (c.PlayerNear ? " player_near" : "");

@@ -517,6 +517,7 @@ namespace Factions
 
         // Expose internals needed by host-side managers (presence, store, price updater).
         public WorldModel          World     { get { return _world; } }
+        public StationMaterializer StationsMaterializer { get { return _stationMaterializer; } }
         public IPriceOracle        Oracle    { get { return _oracle; } }
         /// <summary>The concrete oracle, for the one caller that needs the target decomposition
         /// rather than the scarcity number — <c>factions target</c>. Not on

@@ -8,7 +8,9 @@ using Sandbox.Engine.Voxels.Planet;
 using Sandbox.Game.Entities;
 using Sandbox.Game.SessionComponents;
 using SpaceEngineers.Game.AI;
+using Sandbox;
 using Sandbox.Definitions;
+using Sandbox.Game.World;
 using VRage.Game;
 using VRageMath;
 
@@ -52,6 +54,17 @@ namespace Factions
 
         private static MyPlanetAnimalSpawnInfo _silent;
 
+        /// <summary>The <see cref="FaunaRule.OncePerNight"/> rules, by the spawn info built for them:
+        /// what SE hands <c>SpawnBot</c> is that object, so this is how a bot is traced to its rule.
+        /// </summary>
+        private static readonly Dictionary<MyPlanetAnimalSpawnInfo, FaunaRule> _nightRuleOf =
+            new Dictionary<MyPlanetAnimalSpawnInfo, FaunaRule>();
+
+        private static readonly FaunaNightGate _nightGate = new FaunaNightGate();
+
+        /// <summary><c>MySpaceFaunaComponent.SpawnInfo.Position</c>: the wave's spawn point.</summary>
+        private static FieldInfo _spawnPointPosition;
+
         private static FieldInfo _storageData;
         private static FieldInfo _storageSeed;
 
@@ -63,6 +76,9 @@ namespace Factions
 
         /// <summary>The registration hook is in place.</summary>
         internal static bool RegistrationBound { get; private set; }
+
+        /// <summary>The once-per-night hook on <c>SpawnBot</c> is in place.</summary>
+        internal static bool NightGateBound { get; private set; }
 
         internal static string InactiveReason { get; private set; }
 
@@ -86,6 +102,8 @@ namespace Factions
         {
             _policy = policy;
             _built.Clear();
+            _nightRuleOf.Clear();
+            _nightGate.Clear();
         }
 
         internal static void TryPatch(Harmony harmony)
@@ -117,6 +135,8 @@ namespace Factions
                 harmony.Patch(hasFauna,
                     postfix: new HarmonyMethod(typeof(FaunaControl).GetMethod("HasFaunaPostfix", BindingFlags.NonPublic | BindingFlags.Static)));
                 RegistrationBound = true;
+
+                if (AnyOncePerNight()) TryPatchNightGate(harmony);
             }
             catch (Exception ex)
             {
@@ -295,6 +315,7 @@ namespace Factions
             if (rule.KillDelaySeconds.HasValue) info.KillDelay = Ms(rule.KillDelaySeconds.Value);
 
             _built[rule] = info;
+            if (rule.OncePerNight) _nightRuleOf[info] = rule;
             return info;
         }
 
@@ -315,6 +336,75 @@ namespace Factions
         private static int Ms(double seconds)
         {
             return (int)Math.Round(Math.Min(seconds * 1000.0, int.MaxValue));
+        }
+
+        private static bool AnyOncePerNightSafe()
+        {
+            return _policy != null && AnyOncePerNight();
+        }
+
+        private static bool AnyOncePerNight()
+        {
+            foreach (FaunaPolicy.Entry body in _policy.Entries)
+                if (body.Rules != null)
+                    foreach (FaunaRule r in body.Rules)
+                        if (r != null && r.OncePerNight) return true;
+            return false;
+        }
+
+        /// <summary>Hooks <c>MySpaceFaunaComponent.SpawnBot</c>, called once per bot of a wave with the
+        /// wave's spawn point and the spawn info that chose it. A miss leaves SE's own cadence and
+        /// says so; it never fails the rest of the fauna hooks.</summary>
+        private static void TryPatchNightGate(Harmony harmony)
+        {
+            try
+            {
+                MethodInfo spawnBot = AccessTools.Method(typeof(MySpaceFaunaComponent), "SpawnBot");
+                Type pointType = spawnBot == null ? null : spawnBot.GetParameters()[0].ParameterType;
+                _spawnPointPosition = pointType == null ? null : AccessTools.Field(pointType, "Position");
+                if (spawnBot == null || _spawnPointPosition == null || _spawnPointPosition.FieldType != typeof(Vector3D))
+                {
+                    Log.Warn("Fauna: MySpaceFaunaComponent.SpawnBot or its spawn point's Position did not resolve; "
+                             + "OncePerNight rules spawn at SE's own cadence.");
+                    return;
+                }
+                harmony.Patch(spawnBot,
+                    prefix: new HarmonyMethod(typeof(FaunaControl).GetMethod("SpawnBotPrefix", BindingFlags.NonPublic | BindingFlags.Static)));
+                NightGateBound = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "Fauna: the once-per-night hook threw while patching; OncePerNight rules spawn at SE's own cadence.");
+            }
+        }
+
+        /// <summary>Refuses a bot of a <see cref="FaunaRule.OncePerNight"/> rule whose area already had
+        /// its wave this night. Harmony binds the arguments by position: SE's spawn point (a private
+        /// type), the planet, and the spawn info.</summary>
+        private static bool SpawnBotPrefix(object __0, MyPlanetAnimalSpawnInfo __2)
+        {
+            try
+            {
+                FaunaRule rule;
+                if (__0 == null || __2 == null || !_nightRuleOf.TryGetValue(__2, out rule)) return true;
+                var point = (Vector3D)_spawnPointPosition.GetValue(__0);
+                long now = MySandboxGame.TotalGamePlayTimeInMilliseconds;
+                long lockMs = FaunaNightGate.LockMs(MySession.Static != null && MySession.Static.Settings.EnableSunRotation,
+                                                    MySession.Static == null ? 0 : MySession.Static.Settings.SunRotationIntervalMinutes);
+                int opened = _nightGate.Opened;
+                bool admit = _nightGate.Admit(rule, __0, point.X, point.Y, point.Z, now, lockMs);
+                if (DebugEnabled && (!admit || _nightGate.Opened != opened))
+                    Log.Info("FAUNA_NIGHT " + (admit ? "admitted" : "refused")
+                             + " animals=" + string.Join(",", rule.Animals.ToArray())
+                             + " lockMin=" + (lockMs / 60000.0).ToString("0", CultureInfo.InvariantCulture)
+                             + " held=" + _nightGate.Held);
+                return admit;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "Fauna: once-per-night check failed; the bot spawns.");
+                return true;
+            }
         }
 
         /// <summary>The terrain seed, read only when two authored bodies share a generator — the one
@@ -361,7 +451,11 @@ namespace Factions
                  + " registration=" + (RegistrationBound ? "bound" : "UNBOUND")
                  + (InactiveReason == null ? "" : " (" + InactiveReason + ")")
                  + " authored=" + Authored + " native=" + Native + " silent=" + Silenced
-                 + " registered=" + Registered;
+                 + " registered=" + Registered
+                 + (AnyOncePerNightSafe()
+                    ? " nightGate=" + (NightGateBound ? "bound" : "UNBOUND") + " nightLocks=" + _nightGate.Held
+                      + " nightRefused=" + _nightGate.Refused
+                    : "");
         }
     }
 }
