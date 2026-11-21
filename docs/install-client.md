@@ -74,8 +74,11 @@ You only need to do this once. The option stays in place for every future game s
    | Branch Name | `main` |
    | Metadata File | `FactionsUI.xml` |
 
-   **Metadata File** is filled with `PluginHub.xml` by default; replace it. Click **Add**, then
-   **Apply**.
+   **Check the Metadata File field before you click Add. Pulsar fills it in with `PluginHub.xml`,
+   which is wrong for Factions UI and easy to miss. It must read `FactionsUI.xml`.** With the wrong
+   file name the source is saved anyway, and Factions UI never appears in the plugin list.
+
+   Click **Add**, then **Apply**.
 4. Back in the plugin list, find **Factions UI**, tick **Enabled**, and click **Apply**.
 5. Pulsar asks to restart the game. Accept. Pulsar downloads and compiles the plugin during start-up,
    so this start takes longer than usual.
@@ -109,9 +112,11 @@ it for `FactionsUI:`.
 
 - **No Sources button.** The game was started without `-sources`; check the launch options and
   restart.
-- **Factions UI is not in the plugin list.** Check the four fields in the Sources window, in
-  particular **Metadata File**, which must read `FactionsUI.xml`. Then click **Refresh** in the
-  plugin list.
+- **Factions UI is not in the plugin list.** In **Sources**, click the Factions entry under
+  **Plugins** and check its **File**. It must read `FactionsUI.xml`; `PluginHub.xml` is the
+  auto-filled default and the usual cause. Adding the source again does not fix it: Pulsar answers
+  "This source already exists in the list." and keeps the old entry. Remove the entry, click
+  **Apply**, then add it again with the right file name and click **Apply**.
 - **`UPLINK_REFUSED protocol`.** The client and server are on different releases. Restart the game
   so Pulsar fetches the current release. If the server is the older one, the client links again once
   the server updates.
