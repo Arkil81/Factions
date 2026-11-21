@@ -25,6 +25,10 @@ namespace Factions
         /// sentence, for the FactionsUI HUD.</summary>
         internal Action<ulong, CombatTone, string> KillNoticeSink { get; set; }
 
+        /// <summary>Nexus authority: tells a player on an agent of their kill, by the identity that
+        /// agent reported; answers their Steam id, or 0 when no agent reports them.</summary>
+        internal Func<long, CombatTone, string, ulong> RemoteKillSink { get; set; }
+
         /// <summary>Whether hull <paramref name="eid"/>, whose thrust loss was just confirmed, was shot
         /// out of action: a hit from a grid outside its faction inside
         /// <see cref="DisabledHull.HostileHitWindow"/>. Names that grid and when it hit.</summary>
@@ -182,6 +186,12 @@ namespace Factions
             var vanilla = _spawner as VanillaFleetSpawner;
             by = vanilla != null ? vanilla.OwnerIdentityOf(attackerGrid) : 0;
             if (by == 0) return 0;
+            Func<long, CombatTone, string, ulong> remote = RemoteKillSink;
+            if (remote != null)
+            {
+                ulong there = remote(by, CombatTone.Win, DisabledHull.KillSentence(fleet.ActorTag, fleet.Kind, prefab, where));
+                if (there != 0) return there;
+            }
             MySession session = MySession.Static;
             ulong steam = session != null && session.Players != null ? session.Players.TryGetSteamId(by) : 0UL;
             if (steam == 0) return 0;

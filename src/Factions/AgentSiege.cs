@@ -234,7 +234,7 @@ namespace Factions
 
         /// <summary>A yes or no typed here. True, and queued for the authority, when it answers an offer
         /// the authority made this player; the chat line is then not shown to anyone.</summary>
-        public bool TryAnswer(long identity, bool yes)
+        public bool TryAnswer(long identity, bool yes, string nodeId)
         {
             DateTime shown;
             if (identity == 0 || !_awaiting.TryGetValue(identity, out shown)) return false;
@@ -242,7 +242,7 @@ namespace Factions
             if (DateTime.UtcNow - shown > AnswerWindow) return false;
             _unacked.Add(new NexusSiegeEvent
             {
-                Seq = ++_seq, Attacker = identity, Answer = yes ? NexusAnswer.Yes : NexusAnswer.No,
+                Seq = ++_seq, Attacker = identity, Answer = yes ? NexusAnswer.Yes : NexusAnswer.No, Node = nodeId,
             });
             return true;
         }
@@ -266,6 +266,9 @@ namespace Factions
             }
         }
 
+        /// <summary>Puts a notice's combat line on the player's FactionsUI HUD: identity, tone, text.</summary>
+        internal static Action<long, CombatTone, string> CombatSink;
+
         private static void Show(NexusNotice n)
         {
             if (n.Identity == 0 || string.IsNullOrEmpty(n.Text)) return;
@@ -276,6 +279,8 @@ namespace Factions
                 string font = n.Font ?? "White";
                 if (n.HudMs > 0) MyVisualScriptLogicProvider.ShowNotification(n.Text, n.HudMs, font, n.Identity);
                 if (n.Chat) MyVisualScriptLogicProvider.SendChatMessage(n.Text, n.Author ?? NoticeAuthor, n.Identity, font);
+                Action<long, CombatTone, string> combat = CombatSink;
+                if (n.Combat > 0 && combat != null) combat(n.Identity, (CombatTone)(n.Combat - 1), n.Text);
             }
             catch (Exception ex) { Log.Warn(ex, "AgentSiege: notice to " + n.Identity + " threw."); }
         }

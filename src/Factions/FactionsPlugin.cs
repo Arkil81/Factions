@@ -63,7 +63,7 @@ namespace Factions
         internal FactionTuning Tuning { get { return _tuning; } }
 
         /// <summary>Restoration at the Services Terminal; null until the session loads.</summary>
-        internal RestorationService Restoration { get { return _restorationService; } }
+        internal RestorationService Restoration { get { return _restorationService ?? _agentRestoration; } }
 
         // Command bridge: stdin into Torch -console is unreliable, so commands arrive via a watched
         // file instead. One command per line in <storage>/Factions/bridge/inbox.txt is run with server
@@ -122,6 +122,7 @@ namespace Factions
         private PlayerPresenceManager _presenceManager;
         private ClaimOfferManager _claimOfferManager;
         private ConquerOfferManager _conquerOfferManager;
+        private OfferReplyRouter _offerReplyRouter;
         private PresenceReinforceManager _presenceReinforceManager;
         private StationStoreManager   _storeManager;
         private GlobalPriceUpdater    _priceUpdater;
@@ -166,10 +167,22 @@ namespace Factions
         private PlayerDiplomacyManager _playerDiplomacyManager;
         private PlayerWingManager _playerWingManager;
         private PlayerCrewOrderManager _playerCrewOrderManager;
+        private AgentTerminalSurfaces _agentTerminalSurfaces;
+        private AgentCaptures _agentCaptures;
+        /// <summary>Agent: the capture generation of the snapshot whose designs are loaded; null
+        /// before the first snapshot. A load is in flight while <see cref="_agentCaptureLoad"/> is set.</summary>
+        private int? _agentCapturesLoaded;
+        private System.Threading.Tasks.Task<CustomPrefabStore> _agentCaptureLoad;
+        private int _agentCaptureLoading;
+        private string _agentDataDir;
+
+        /// <summary>Agent: the capture relay; null elsewhere.</summary>
+        internal AgentCaptures AgentCaptures { get { return _agentCaptures; } }
         private CombatOutcomeNotices _combatOutcomeNotices;
         private TrafficCallouts _trafficCallouts;
         /// <summary>Authority: station traffic of the last few seconds, for the agents' players.</summary>
         private readonly NexusTrafficRelay _trafficRelay = new NexusTrafficRelay();
+        private readonly NexusCombatRelay _combatRelay = new NexusCombatRelay();
         /// <summary>Agent: plays the authority's station traffic to this server's players.</summary>
         private TrafficCallouts _agentTraffic;
         private SensorOcclusion _agentOcclusion;
@@ -713,9 +726,9 @@ namespace Factions
                           // transient spawn -- is an entity in the caller's own sector, which is not
                           // this process when the caller is on another server.
                           | Factions.Wire.WireFeatures.ShipAssets
-                          // Granted here and nowhere else, for the reason above: a refit closes and
-                          // rebuilds a live station grid, and the scan behind it reads one, so every
-                          // step of it is an entity in the caller's own sector.
+                          // Station refit. Relayed to an agent's players: the node actions are this
+                          // server's, and the agent answers the terminal and the scan itself
+                          // (AgentTerminalSurfaces).
                           | Factions.Wire.WireFeatures.StationRefit
                           // Granted here and nowhere else, for the same reason: the scan dialogs'
                           // design question names a hull or a terminal in the caller's sector.
@@ -739,8 +752,8 @@ namespace Factions
                           | Factions.Wire.WireFeatures.Tactics
                           | Factions.Wire.WireFeatures.PlayerShelf
                           // The diplomacy readout and its acts. Granted here and not on the agent
-                          // path, and stripped from a relayed client by RemoteWithheldFeatures: the
-                          // leader check resolves the caller from this server's online players.
+                          // path; a relayed client reaches it here, its identity resolved by
+                          // LinkedViewers.
                           | Factions.Wire.WireFeatures.Diplomacy
                           // Wing actions on antennas. Granted here and not on the agent path, and
                           // stripped from a relayed client: the antenna and the hulls it commands are
@@ -761,13 +774,12 @@ namespace Factions
                           // Offered only with protocol 35: a link request carries no feature list,
                           // so an older client would be granted it and lose its chat whispers.
                           | Factions.Wire.WireFeatures.TrafficVoice
-                          // The HUD status panel. Local like combat notices: the sieges it shows
-                          // are run by players in this server's own sectors, and it is stripped
-                          // from a relayed client by RemoteWithheldFeatures.
+                          // The HUD status panel. The sieges it shows are this server's to run,
+                          // wherever their station stands, so it is relayed to an agent's players.
                           | Factions.Wire.WireFeatures.StatusPanel
                           | Factions.Wire.WireFeatures.BlockPause,
                     line => { if (_decisionLog != null) _decisionLog.Write("uplink " + line); });
-                _runtime.AttachStatusPanel(new StatusPanelPublisher(_uplinkManager));
+                _runtime.AttachStatusPanel(new StatusPanelPublisher(_uplinkManager) { RemotePlayers = RemotePlayersNow });
                 _runtime.AttachNexusSiege(QueueRemoteNotice, RemotePlayersNow);
                 _blockPauseNotices = new BlockPauseNotices(_uplinkManager);
                 _gridSpeedManager = new GridSpeedManager(_tuning, _uplinkManager,
@@ -816,11 +828,28 @@ namespace Factions
                     _trafficCallouts.Relay = (e, name, owner, speaker) =>
                         _trafficRelay.Add(NexusTrafficCall.From(e, name, owner, speaker), DateTime.UtcNow);
                     _trafficCallouts.RelayHail = RelayHail;
+                    _uplinkManager.CaptureUploadReceived = OnCaptureUpload;
+                    _wingReadings = new NexusWingReadings();
+                    WingWorld.Relayed = _wingReadings;
+                    _uplinkManager.WingCallReceived = OnWingCall;
+                    _uplinkManager.HullAskReceived = OnHullAsk;
+                    _runtime.CombatRelaySink = (o, sentence) =>
+                        _combatRelay.Add(NexusCombatCall.From(o, sentence), DateTime.UtcNow);
+                    _runtime.RemoteKillSink = QueueRemoteKill;
                     LinkedViewers.ReportedIdentity = ReportedRemoteIdentity;
+                    LinkedViewers.RemotePosition = RemotePositionOf;
                     if (_playerScannerManager != null) _playerScannerManager.RemotePlayers = RemotePlayersNow;
                     if (_playerAssetsManager != null)
                         _playerAssetsManager.RemoteGrids = () => _agentOwnedGrids.Fresh(DateTime.UtcNow, AgentOwnedGridsMaxAge);
                     _uplinkManager.AgentReportReceived = OnAgentReport;
+                    _chatCommands = new NexusChatCommands(Torch, _nexusRelay.TrySend, (byte)_nexusServerId,
+                                                          (byte)_tuning.NexusAuthorityServerId);
+                    _chatCommands.RunVerb = line =>
+                    {
+                        string answer;
+                        return TryRunFactionsVerb(line, out answer) ? (answer ?? "") : null;
+                    };
+                    _uplinkManager.ChatCommandReceived = _chatCommands.OnCommand;
                     Log.Info("Factions authority accepts relayed client uplinks from the cluster (server "
                              + _nexusServerId + ").");
                     var routed = _fleetSpawner as VanillaFleetSpawner;
@@ -828,6 +857,8 @@ namespace Factions
                     {
                         routed.Remote = _fleetRegistry;
                         routed.RouteSpawn = RouteFleetSpawn;
+                        routed.FleetOfGrid = _runtime.FleetOfGridForHandover;
+                        SectorHandover.Attach((byte)_nexusServerId);
                     }
                     Log.Info("Fleets in agents' sectors are flown there: sector lookup "
                              + (NexusGateway.SectorLookupBound ? "bound" : "unavailable, every fleet stays here") + ".");
@@ -871,13 +902,24 @@ namespace Factions
                 _conquerOfferManager = new ConquerOfferManager(_runtime);
                 _conquerOfferManager.AttachChat(Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>());
                 _conquerOfferManager.IsRemote = IsRemotePlayer;
+                _conquerOfferManager.RemotePlayers = RemotePlayersNow;
                 _conquerOfferManager.RemoteWhisper = (identityId, text, offer) =>
                     QueueRemoteNotice(identityId, text, "Red", 0, true, offer);
+                _offerReplyRouter = new OfferReplyRouter(_claimOfferManager, _conquerOfferManager);
+                _offerReplyRouter.AttachChat(Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>());
                 _presenceReinforceManager = new PresenceReinforceManager(_runtime);
                 _respawnPlacement = new RespawnPlacement(_runtime, _decisionLog);
                 RespawnPlacement.Instance = _respawnPlacement;
                 _respawnPlacement.Attach();
-                _nodeSpawnManager = new NodeSpawnManager(_runtime, _uplinkManager, _decisionLog);
+                // The authority's players are set down only in its own sectors: a node an agent's
+                // sector holds stands on that server, not here.
+                FactionRuntime spawnRuntime = _runtime;
+                byte spawnHere = (byte)_nexusServerId;
+                _nodeSpawnManager = _nexusRole == NexusRole.Authority
+                    ? new NodeSpawnManager(() => spawnRuntime.World != null ? spawnRuntime.World.Graph : null,
+                                           spawnRuntime.TryGetStationArrivalFrame,
+                                           node => !NodeInOtherSector(node, spawnHere), _uplinkManager, _decisionLog)
+                    : new NodeSpawnManager(_runtime, _uplinkManager, _decisionLog);
                 NodeSpawnManager.Instance = _nodeSpawnManager;
                 _runtime.AttachChat(Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>());
                 _trespassHailer?.AttachChat(Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>());
@@ -927,10 +969,12 @@ namespace Factions
                 // builds for its own listings rather than scanning the definitions a second time.
                 _playerNodeTransferManager = new PlayerNodeTransferManager(
                     _runtime, _uplinkManager, _storeManager.TryResolveDefinitionId);
+                if (_nexusRole == NexusRole.Authority)
+                    _playerNodeTransferManager.QueueRemoteMove = (home, move) => _stockMoves.Add(home, move, DateTime.UtcNow);
 
                 // After the store manager, because it sells off the store's own offer rows and
                 // settles through it: one price and one floor for the counter and the terminal.
-                _dockSupplyManager = new DockSupplyManager(_runtime, _uplinkManager, _storeManager, _tuning);
+                _dockSupplyManager = new DockSupplyManager(() => TerminalWorld.Of(_runtime), _uplinkManager, _storeManager, _tuning);
                 // After the store manager for the same reason: a restore buys from the same offer
                 // rows and settles node purchases through it.
                 _restorationService = new RestorationService(_runtime, _uplinkManager, _storeManager);
@@ -984,6 +1028,7 @@ namespace Factions
                 _simulationDeferred = false;
                 SimulationGate.Deferred = false;
                 SimulationGate.Hands = false;
+                SimulationGate.HandsPending = false;
                 _nexusRole = NexusRole.Standalone;
                 _authorityOnline = false;
                 _remotePlayers = new RemotePlayerPositions();
@@ -994,7 +1039,11 @@ namespace Factions
                 _agentLoads.Clear();
                 _agentContactsSampled = false;
                 LinkedViewers.ReportedIdentity = null;
+                LinkedViewers.RemotePosition = null;
+                _chatCommands?.Detach();
+                _chatCommands = null;
                 _noticeOutbox = new NexusNoticeOutbox();
+                _stockMoves = new NexusStockMoveOutbox();
                 _agentHands?.Close();
                 _agentHands = null;
                 _gridReaper = null;
@@ -1959,7 +2008,15 @@ namespace Factions
                           | Factions.Wire.WireFeatures.Tactics
                           | Factions.Wire.WireFeatures.PlayerShelf
                           | Factions.Wire.WireFeatures.BlockPause
-                          | Factions.Wire.WireFeatures.TrafficVoice,
+                          | Factions.Wire.WireFeatures.TrafficVoice
+                          | Factions.Wire.WireFeatures.NodeSpawn
+                          | Factions.Wire.WireFeatures.CrewOrders
+                          | Factions.Wire.WireFeatures.CombatOutcome
+                          | Factions.Wire.WireFeatures.DesignVersions
+                          | Factions.Wire.WireFeatures.DockSupply
+                          | Factions.Wire.WireFeatures.ShipAssets
+                          | Factions.Wire.WireFeatures.Restoration
+                          | Factions.Wire.WireFeatures.WingCommand,
                     // FeatureRock deliberately absent: nothing materialises rock in this server's
                     // sectors, so a client told to derive it would render rock that is not there.
                     line => { if (_decisionLog != null) _decisionLog.Write("uplink " + line); });
@@ -1970,8 +2027,16 @@ namespace Factions
                 _munitionSpeedManager = new MunitionSpeedManager(_tuning, _uplinkManager,
                     line => { if (_decisionLog != null) _decisionLog.Write(line); });
                 _blockPauseNotices = new BlockPauseNotices(_uplinkManager);
+                // The seat and the crew it orders are this server's entities, and the orders live here.
+                _playerCrewOrderManager = new PlayerCrewOrderManager(_uplinkManager);
+                _agentCaptures = new AgentCaptures(this, _uplinkManager, () => _tuning, () => _agentHands);
+                // The antenna, the target and the locks are this server's; the order is the authority's.
+                _agentWing = new AgentWing(_uplinkManager);
+                _agentTerminalSurfaces = new AgentTerminalSurfaces(this, _uplinkManager);
+                AgentSiege.CombatSink = SendAgentCombatNotice;
                 _uplinkManager.Register();
                 _authorityOnline = false;
+                StartAgentChatCommands();
                 StartAgentHands();
                 Log.Info("Factions agent: relaying client uplinks to Nexus server " + _tuning.NexusAuthorityServerId
                          + " (this is server " + _nexusServerId + "); serving GridSpeed locally; relay "
@@ -1982,6 +2047,39 @@ namespace Factions
                 Log.Warn(ex, "Factions agent could not start; clients on this server have no uplink.");
                 _uplinkManager = null;
             }
+        }
+
+        /// <summary>Factions chat commands run on the cluster's authority for players connected
+        /// here or to an agent; null on a standalone server.</summary>
+        private NexusChatCommands _chatCommands;
+
+        /// <summary>Agent: this plugin's chat commands go to the authority to run.</summary>
+        private void StartAgentChatCommands()
+        {
+            try
+            {
+                var chat = new NexusChatCommands(Torch, _nexusRelay.TrySend, (byte)_nexusServerId,
+                                                 (byte)_tuning.NexusAuthorityServerId);
+                if (!chat.AttachAgent())
+                {
+                    Log.Warn("Factions agent: Torch's command manager is missing; Factions chat commands refuse here.");
+                    return;
+                }
+                chat.VerbAnswered = (line, answer) =>
+                {
+                    if (answer == null)
+                    {
+                        AppendOutbox("ERROR: the authority did not answer '" + line + "'");
+                        return;
+                    }
+                    string flat = answer.Replace("\r", "").Replace("\n", " | ");
+                    AppendOutbox("OK: " + line + " (server " + _tuning.NexusAuthorityServerId + ") => " + flat);
+                    Log.Info("Bridge verb '" + line + "' ran on server " + _tuning.NexusAuthorityServerId + " => " + flat);
+                };
+                _chatCommands = chat;
+                _uplinkManager.ChatReplyReceived = chat.OnReply;
+            }
+            catch (Exception ex) { Log.Warn(ex, "Factions agent: Factions chat commands refuse here."); }
         }
 
         private const int AgentPruneTicks = 60;
@@ -2012,6 +2110,50 @@ namespace Factions
             foreach (CachedPlayer p in _cachedPlayers) local.Add(p.SteamId);
             _remoteNow = _remotePlayers.Snapshot(now, RemotePositionMaxAge, local);
             return _remoteNow;
+        }
+
+        /// <summary>Authority: where a player on an agent stands, by its last report, and which agent.</summary>
+        private bool RemotePositionOf(ulong steamId, out VRageMath.Vector3D worldM, out byte home)
+        {
+            IList<RemotePlayer> remote = RemotePlayersNow();
+            for (int i = 0; i < remote.Count; i++)
+            {
+                if (remote[i].SteamId != steamId) continue;
+                Vec3 m = remote[i].PositionM;
+                worldM = new VRageMath.Vector3D(m.X, m.Y, m.Z);
+                home = remote[i].HomeServerId;
+                return true;
+            }
+            worldM = VRageMath.Vector3D.Zero;
+            home = 0;
+            return false;
+        }
+
+        /// <summary>Authority: node stock moves for players on agents, re-sent until applied.</summary>
+        private NexusStockMoveOutbox _stockMoves = new NexusStockMoveOutbox();
+        private static readonly TimeSpan StockMoveHold = TimeSpan.FromSeconds(30);
+
+        /// <summary>Authority: the stock moves owed to <paramref name="home"/>. A withdrawal the agent
+        /// never applied, because it restarted or stopped reporting, is returned to the node it was
+        /// taken from.</summary>
+        private List<NexusStockMove> PendingStockMoves(byte home, NexusAgentReport report)
+        {
+            var lapsed = new List<NexusStockMove>();
+            List<NexusStockMove> pending = _stockMoves.Pending(home, report.Session, report.StockMovesThrough,
+                                                               DateTime.UtcNow, StockMoveHold, lapsed);
+            WorldModel world = _runtime != null ? _runtime.World : null;
+            for (int i = 0; i < lapsed.Count; i++)
+            {
+                NexusStockMove m = lapsed[i];
+                SpatialNode node = null;
+                bool returned = !m.Deposit && m.Amount > 0 && world != null && m.Node != null
+                                && world.Graph.Nodes.TryGetValue(m.Node, out node);
+                if (returned) NodeTransfer.CreditNode(node, m.Key, m.Amount);
+                Log.Warn("NEXUS_STOCK_MOVE_LAPSED server=" + home + " node=" + (m.Node ?? "-") + " key=" + m.Key
+                         + " amount=" + m.Amount + " dir=" + (m.Deposit ? "deposit" : "withdraw")
+                         + " returned=" + (returned ? m.Amount : 0));
+            }
+            return pending;
         }
 
         /// <summary>Authority: the identity an agent reported for a player it hosts; 0 when no
@@ -2104,6 +2246,24 @@ namespace Factions
             }
         }
 
+        /// <summary>Authority: a kill confirmation to a player on an agent, by the identity that agent
+        /// reported: the chat line and the HUD combat notice. Their Steam id, or 0 when no agent reports
+        /// them.</summary>
+        private ulong QueueRemoteKill(long identityId, CombatTone tone, string text)
+        {
+            if (identityId == 0 || string.IsNullOrEmpty(text)) return 0UL;
+            IList<RemotePlayer> remote = RemotePlayersNow();
+            for (int i = 0; i < remote.Count; i++)
+            {
+                if (remote[i].IdentityId != identityId) continue;
+                _noticeOutbox.Add(remote[i].HomeServerId,
+                    new NexusNotice { Identity = identityId, Text = text, Font = "Blue", Chat = true, Combat = (int)tone + 1 },
+                    DateTime.UtcNow);
+                return remote[i].SteamId;
+            }
+            return 0UL;
+        }
+
         /// <summary>Authority: a chat notice to a player on an agent, by Steam id; the notice names them
         /// by the identity that agent reported. False when they are on no reporting agent.</summary>
         private bool QueueRemoteChat(ulong steamId, string text, string font, string author, bool offer)
@@ -2169,9 +2329,10 @@ namespace Factions
             {
                 if (_agentHands == null || !msg.AuthorSteamId.HasValue) return;
                 bool isYes;
-                if (!ConquerOfferManager.TryParseYesNo(msg.Message, out isYes)) return;
+                string nodeId;
+                if (!OfferReply.TryParse(msg.Message, out isYes, out nodeId)) return;
                 long identityId = MySession.Static.Players.TryGetIdentityId(msg.AuthorSteamId.Value);
-                if (_agentHands.TryAnswer(identityId, isYes)) consumed = true;
+                if (_agentHands.TryAnswer(identityId, isYes, nodeId)) consumed = true;
             }
             catch (Exception ex) { Log.Warn(ex, "Agent offer answer threw."); }
         }
@@ -2231,6 +2392,7 @@ namespace Factions
                     string resolved = DataDirectory.Resolve(_tuning.DataDirectory, InstanceDir);
                     if (Directory.Exists(resolved)) dataDir = resolved;
                 }
+                _agentDataDir = dataDir;
                 string policyStatus;
                 SurfaceNodePolicy policy = LoadSurfaceNodePolicy(out policyStatus, dataDir);
                 var planets = new SePlanetCatalogue(policy);
@@ -2256,6 +2418,7 @@ namespace Factions
                     fleetSpawner.SetPlanets(planets);
                     VanillaFleetSpawner.DebugBroadcast = StationMaterializer.DebugBroadcast;
                     SimGridMarks.Attach();
+                    SectorHandover.Attach((byte)_nexusServerId);
                 }
                 catch (Exception ex)
                 {
@@ -2271,8 +2434,30 @@ namespace Factions
                     if (_agentHands != null) _agentHands.RecordTransfer(from, to, amount);
                 };
                 StartAgentStores();
+                if (fleetSpawner != null && _agentWing != null)
+                {
+                    // A station's call reads its hits here: on this server's Factions stations, and on
+                    // any grid whose call stands.
+                    AgentWing wing = _agentWing;
+                    AgentHands hands = _agentHands;
+                    wing.ReadStationGrids = into => hands.Stations.MaterializedStationGrids(into);
+                    wing.NpcOwnerOf = nodeId =>
+                    {
+                        SpatialGraph graph = hands.Graph;
+                        SpatialNode node;
+                        if (graph == null || !graph.Nodes.TryGetValue(nodeId, out node) || node == null) return null;
+                        FactionState owner = hands.FindFaction(node.OwnerFactionTag);
+                        return owner != null && !owner.IsPlayerFaction ? owner.Tag : null;
+                    };
+                    wing.Decision = line => { if (_decisionLog != null) _decisionLog.Write(line); };
+                    wing.EnsureHits = fleetSpawner.EnsureDamageHandler;
+                    fleetSpawner.StationAttackWatched = wing.WatchesStation;
+                    fleetSpawner.StationAttackerSink = wing.RecordHit;
+                }
                 if (fleetSpawner != null) CrewPresence.AgentPrefabOf = fleetSpawner.GridPrefabId;
                 CrewPresence.AgentCatalogue = LoadAgentPrefabCatalogue(dataDir);
+                StartAgentShipAssets();
+                StartAgentRestoration();
                 // The record mirror stands every snapshot station here, so vanilla's economy tick walks
                 // as many as the authority's does; it is sliced the same way, from TickAgent.
                 EconomyTickSlicer.TickedOnAgent = true;
@@ -2293,12 +2478,14 @@ namespace Factions
                 _agentHands.TellObservers = TellPlayersNear;
                 _agentChat = Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>();
                 if (_agentChat != null) _agentChat.MessageProcessing += OnAgentChat;
+                SimulationGate.HandsPending = true;
                 Log.Info("Factions agent: materialising stations and rock for this server's sectors from the "
                          + "authority's node snapshot; inputs from " + dataDir + "; " + featureStatus);
             }
             catch (Exception ex)
             {
                 Log.Warn(ex, "Factions agent could not start materialising; this server's sectors show no Factions rock.");
+                SimulationGate.HandsPending = false;
                 _agentHands = null;
                 _gridReaper = null;
                 EconomyTickSlicer.TickedOnAgent = false;
@@ -2321,6 +2508,106 @@ namespace Factions
                 });
             };
             StoreTransactionHelpers.AgentStores = true;
+            // Refuel and rearm write into a ship docked here, out of the shelf the authority priced;
+            // what landed goes back to it as a Supply event.
+            _agentHands.Store.RemoteSupplySettled = (node, buyer, service, units, credits) =>
+            {
+                if (_agentHands == null) return;
+                _agentHands.RecordStoreEvent(new NexusStoreEvent
+                {
+                    Kind = NexusStoreEventKind.Supply, Node = node.Id, Seller = service, Credits = credits,
+                    Buyer = buyer, Steam = SteamOf(buyer), Parts = new Dictionary<string, long>(units, StringComparer.Ordinal),
+                });
+            };
+            _agentDockSupply = new DockSupplyManager(AgentTerminalWorld, _uplinkManager, _agentHands.Store, _tuning);
+        }
+
+        private DockSupplyManager _agentDockSupply;
+        private AgentWing _agentWing;
+        private PlayerShipAssetsManager _agentShipAssets;
+
+        /// <summary>Agent: the Services Terminal's ship rows, withdraw and send, over the snapshot's
+        /// hull stock. Grid storage and the hull are this server's; what moved goes to the authority
+        /// as a Hull event.</summary>
+        private void StartAgentShipAssets()
+        {
+            _agentShipAssets = new PlayerShipAssetsManager(null, AgentTerminalWorld,
+                () => CrewPresence.AgentCatalogue,
+                () => _agentHands != null ? _agentHands.CustomPrefabs : null,
+                _uplinkManager, null);
+            _agentShipAssets.RemoteHull = (nodeId, prefab, withdrawn, cargo, hold) =>
+            {
+                if (_agentHands == null) return;
+                _agentHands.RecordStoreEvent(new NexusStoreEvent
+                {
+                    Kind = NexusStoreEventKind.Hull, Node = nodeId, Prefab = prefab, Buy = withdrawn, Hold = hold,
+                    Parts = cargo != null && cargo.Count > 0 ? new Dictionary<string, long>(cargo, StringComparer.Ordinal) : null,
+                });
+            };
+            // The node's stock is the authority's: it holds the hull before the clone is staged here.
+            _agentShipAssets.AskHold = ask =>
+                _uplinkManager != null && _uplinkManager.ForwardFrame(Factions.Wire.RelayKind.HullAsk, 0UL, ask.Encode(), "hull-hold");
+            _uplinkManager.HullAnswerReceived = (steamId, payload) =>
+            {
+                NexusHullAnswer answer;
+                if (!NexusHullAnswer.TryDecode(payload, out answer))
+                {
+                    Log.Warn("NEXUS_HULL_ANSWER_UNREADABLE bytes=" + (payload == null ? 0 : payload.Length));
+                    return;
+                }
+                PlayerShipAssetsManager assets = _agentShipAssets;
+                if (assets != null) assets.OnHoldAnswer(answer);
+            };
+        }
+
+        private RestorationService _agentRestoration;
+        private RestorationReferences _agentRestorationRefs;
+        private IItemPriceCatalogue _agentPrices;
+
+        /// <summary>Agent: the Repair tab's Restore at a Factions station here. The ship, the terminal
+        /// and the welding are this server's; the references are the data directory's designs and
+        /// captures, read here and never written. Node components settle as Supply events, and a
+        /// design registered here goes to the authority to be written, its fee to the node's owner.</summary>
+        private void StartAgentRestoration()
+        {
+            _agentRestorationRefs = new RestorationReferences(
+                () => _agentHands != null ? _agentHands.CustomPrefabs : null,
+                (long eid, out string via) =>
+                {
+                    Func<long, string> prefabOf = CrewPresence.AgentPrefabOf;
+                    string prefab = prefabOf != null ? prefabOf(eid) : null;
+                    via = prefab != null ? "spawn" : null;
+                    return prefab;
+                },
+                _tuning);
+            try { _agentPrices = SeItemPriceCatalogue.Load(StorageDir, _tuning, null); }
+            catch (Exception ex) { Log.Warn(ex, "Factions agent: item prices unavailable; Restore here sells no components from the bank."); }
+            _agentRestoration = new RestorationService(AgentTerminalWorld, () => _agentRestorationRefs, AgentItemValue,
+                                                       AgentRegisterDesign, _uplinkManager, _agentHands.Store);
+        }
+
+        /// <summary>As <see cref="WorldModel.ItemUnitValue"/> over the same catalogue the authority
+        /// derives, so the bank charges the same here as there; 0 with no catalogue.</summary>
+        private long AgentItemValue(string key)
+        {
+            IItemPriceCatalogue prices = _agentPrices;
+            if (prices == null || string.IsNullOrEmpty(key)) return 0;
+            long v = prices.BasePrice(key);
+            return v > 0 ? v : 1;
+        }
+
+        private bool AgentRegisterDesign(RestorationLiveGroup live, long payer, ulong steam, SpatialNode node, long fee,
+                                         out string fingerprint)
+        {
+            VRage.Game.MyObjectBuilder_CubeGrid[] grids = RestorationReferences.DesignOf(live, out fingerprint);
+            Sandbox.Game.Entities.MyCubeGrid root = live.Grids[0];
+            CustomPrefabStore store = _agentHands != null ? _agentHands.CustomPrefabs : null;
+            if (store != null) store.KeepDesign(root.EntityId, fingerprint, grids, root.DisplayName, payer, DateTime.UtcNow);
+            bool sent = _agentCaptures != null
+                && _agentCaptures.RegisterDesign(steam, payer, node, fee, root.EntityId, fingerprint, root.DisplayName, grids);
+            Log.Info("DESIGN_REGISTERED grid=" + root.EntityId + " blocks=" + live.BlockCount + " grids=" + live.Grids.Count
+                     + " fingerprint=" + fingerprint + " by=" + payer + " fee=" + fee + " relayed=" + (sent ? "sent" : "failed"));
+            return sent;
         }
 
         private DebrisAbsorbManager _agentDebris;
@@ -2360,11 +2647,56 @@ namespace Factions
             RespawnPlacement.Instance = _agentRespawn;
             RespawnPlacement.OnAgent = true;
             _agentRespawn.Attach();
+
+            byte here = (byte)_nexusServerId;
+            _nodeSpawnManager = new NodeSpawnManager(
+                () => _agentHands != null ? _agentHands.Graph : null,
+                AgentArrivalFrame,
+                node => NodeInThisSector(node, here),
+                _uplinkManager, _decisionLog);
+            NodeSpawnManager.Instance = _nodeSpawnManager;
+            NodeSpawnManager.OnAgent = true;
+        }
+
+        private bool AgentArrivalFrame(SpatialNode node, out VRageMath.Vector3D stationPos, out VRageMath.Vector3D stationUp,
+                                       out float clearanceM, out string error)
+        {
+            StationMaterializer stations = _agentHands != null ? _agentHands.Stations : null;
+            if (stations == null)
+            {
+                stationPos = VRageMath.Vector3D.Zero; stationUp = VRageMath.Vector3D.Up; clearanceM = 0f;
+                error = "no station materialiser";
+                return false;
+            }
+            return stations.TryGetArrivalFrame(node, out stationPos, out stationUp, out clearanceM, out error);
+        }
+
+        /// <summary>Whether Nexus places <paramref name="node"/> in server <paramref name="serverId"/>'s
+        /// sectors. False when no sector holds it, or Nexus cannot be read.</summary>
+        private static bool NodeInThisSector(SpatialNode node, byte serverId)
+        {
+            byte at;
+            return node != null && NexusGateway.TryServerAt(
+                       new VRageMath.Vector3D(node.Position.X, node.Position.Y, node.Position.Z) * 1000.0, out at)
+                   && at == serverId;
+        }
+
+        /// <summary>Whether the node stands in a sector Nexus gives to another server. False when the
+        /// sector lookup cannot say, so an unbound lookup offers every node, as before.</summary>
+        private static bool NodeInOtherSector(SpatialNode node, byte serverId)
+        {
+            byte at;
+            return node != null && NexusGateway.TryServerAt(
+                       new VRageMath.Vector3D(node.Position.X, node.Position.Y, node.Position.Z) * 1000.0, out at)
+                   && at != 0 && at != serverId;
         }
 
         private void ClearAgentStoreHooks()
         {
             RespawnPlacement.OnAgent = false;
+            NodeSpawnManager.OnAgent = false;
+            if (NodeSpawnManager.Instance == _nodeSpawnManager) NodeSpawnManager.Instance = null;
+            _nodeSpawnManager = null;
             if (_agentRespawn != null)
             {
                 try { _agentRespawn.Detach(); }
@@ -2436,6 +2768,40 @@ namespace Factions
             // From the first snapshot on, the station claims exist, so the cell generator can be kept
             // off Factions stations. Before it, vanilla places them as it always has here.
             if (_agentHands.ClaimsSeeded) SimulationGate.Hands = true;
+            ReloadAgentCapturesIfMoved(_agentHands.Captures);
+        }
+
+        /// <summary>Agent: reads the captured designs again, off the game thread, when the authority's
+        /// capture generation has moved since the last load. The first snapshot only sets the mark:
+        /// the store was read at boot.</summary>
+        private void ReloadAgentCapturesIfMoved(int generation)
+        {
+            if (!_agentCapturesLoaded.HasValue) { _agentCapturesLoaded = generation; return; }
+            if (_agentCapturesLoaded.Value == generation || _agentCaptureLoad != null) return;
+            if (_agentDataDir == null) return;
+            string dir = Path.Combine(_agentDataDir, "custom_prefabs");
+            _agentCaptureLoading = generation;
+            _agentCaptureLoad = System.Threading.Tasks.Task.Run(() => CustomPrefabStore.LoadAll(dir));
+        }
+
+        /// <summary>Agent: swaps in a finished reload on the game thread; a failed one keeps the old
+        /// store and is retried at the next snapshot.</summary>
+        private void SwapAgentCaptures()
+        {
+            System.Threading.Tasks.Task<CustomPrefabStore> load = _agentCaptureLoad;
+            if (load == null || !load.IsCompleted) return;
+            _agentCaptureLoad = null;
+            if (load.IsFaulted || load.Result == null)
+            {
+                Log.Warn(load.Exception, "NEXUS_CAPTURES_RELOAD_FAILED generation=" + _agentCaptureLoading);
+                return;
+            }
+            _agentHands.ReplaceCustomPrefabs(load.Result);
+            // The authority rewrites the catalogue sidecar when a capture adds a design: a Send to
+            // node matches a hull against it.
+            if (_agentDataDir != null) CrewPresence.AgentCatalogue = LoadAgentPrefabCatalogue(_agentDataDir) ?? CrewPresence.AgentCatalogue;
+            _agentCapturesLoaded = _agentCaptureLoading;
+            Log.Info("NEXUS_CAPTURES_RELOADED generation=" + _agentCaptureLoading);
         }
 
         /// <summary>Agent: sends what the materialisers placed until the snapshot shows it applied.</summary>
@@ -2446,6 +2812,7 @@ namespace Factions
             report.Names = PlayerNamesDue(DateTime.UtcNow);
             report.Log = _agentLogOutbox.Pending();
             report.Docked = DockedSeats();
+            report.Muted = _agentWing != null ? _agentWing.MutedNodes() : null;
             byte[] frame = Factions.Wire.NexusRelayWire.Write(Factions.Wire.RelayKind.AgentReport,
                 (byte)_nexusServerId, 0UL, report.Encode());
             _nexusRelay.TrySend((byte)_tuning.NexusAuthorityServerId, frame);
@@ -2511,6 +2878,7 @@ namespace Factions
             if (report.Contacts != null)
                 _agentContacts[homeServerId] = new KeyValuePair<List<NexusPlayerContact>, DateTime>(report.Contacts, DateTime.UtcNow);
             _agentOwnedGrids.Update(homeServerId, report.OwnedGrids, DateTime.UtcNow);
+            if (_runtime != null) _runtime.SetAgentMutedStations(homeServerId, report.Muted, DateTime.UtcNow);
             if (report.Names != null)
                 for (int i = 0; i < report.Names.Count; i++)
                     if (report.Names[i] != null && report.Names[i].Steam != 0 && report.Names[i].Name != null)
@@ -2532,9 +2900,9 @@ namespace Factions
             {
                 if (siege[i].Answer == NexusAnswer.None) continue;
                 bool yes = siege[i].Answer == NexusAnswer.Yes;
-                if (_conquerOfferManager != null && _conquerOfferManager.Answer(siege[i].Attacker, yes)) continue;
-                if (_claimOfferManager != null)
-                    _claimOfferManager.Answer(LocalIdentityOfReported(homeServerId, siege[i].Attacker), yes);
+                if (_offerReplyRouter != null)
+                    _offerReplyRouter.Route(siege[i].Attacker, LocalIdentityOfReported(homeServerId, siege[i].Attacker),
+                                            yes, siege[i].Node);
             }
             _agentDocked[homeServerId] = report.Docked != null ? new HashSet<long>(report.Docked) : new HashSet<long>();
             BookAgentTransfers(homeServerId, report, reply);
@@ -2543,16 +2911,30 @@ namespace Factions
             FillShelves(homeServerId, report, reply);
             reply.Notices = _noticeOutbox.Pending(homeServerId, report.Session, report.NoticesThrough,
                                                   DateTime.UtcNow, RemoteNoticeHold);
+            reply.StockMoves = PendingStockMoves(homeServerId, report);
             DateTime fleetNow = DateTime.UtcNow;
             List<string> answered = _fleetRegistry.Apply(homeServerId, report, fleetNow);
+            foreach (long eid in _fleetRegistry.TakeRehomed())
+            {
+                Log.Info("NEXUS_FLEET_REHOMED eid=" + eid + " home=" + homeServerId);
+                _runtime?.ResumeHandedOver(eid, homeServerId);
+            }
             if (answered.Count > 0)
                 Log.Info("NEXUS_FLEET_SPAWNS home=" + homeServerId + " answered=" + answered.Count
                          + " live=" + _fleetRegistry.LiveCount + " spawning=" + _fleetRegistry.SpawningCount);
             List<NexusFleetOrder> orders; List<NexusFleetAsk> asks; List<long> held; List<NexusFleetBands> bands;
             _fleetRegistry.FillReply(homeServerId, fleetNow, out orders, out asks, out held, out bands);
             reply.Orders = orders; reply.Asks = asks; reply.Held = held; reply.Bands = bands;
-            if (HasRemotePlayers(homeServerId)) reply.Traffic = _trafficRelay.Take(homeServerId, fleetNow);
-            else _trafficRelay.Skip(homeServerId);
+            if (HasRemotePlayers(homeServerId))
+            {
+                reply.Traffic = _trafficRelay.Take(homeServerId, fleetNow);
+                reply.Combat = _combatRelay.Take(homeServerId, fleetNow);
+            }
+            else
+            {
+                _trafficRelay.Skip(homeServerId);
+                _combatRelay.Skip(homeServerId);
+            }
             // Sent every time, empty or not: an agent takes the zone list whole, so a siege that
             // ended has to be heard as a list without it.
             if (_nexusRelay != null)
@@ -2585,8 +2967,223 @@ namespace Factions
                 return;
             }
             _agentHands.ApplyStationReply(reply);
+            ApplyAgentStockMoves(reply.StockMoves);
             _agentLogOutbox.Ack(reply.LogThrough);
             PlayAgentTraffic(reply.Traffic);
+            TellAgentCombat(reply.Combat);
+        }
+
+        /// <summary>Authority: registers a capture an agent made, and answers it.</summary>
+        private NexusWingReadings _wingReadings;
+        private DateTime _wingReadingsPrunedUtc;
+
+        /// <summary>Authority: a wing command given on an agent, or a refresh of a standing order's
+        /// readings. The readings are kept for <see cref="WingWorld"/>; a command is issued as the
+        /// local doors issue theirs, against the commander the agent named. A refresh is answered
+        /// only when its order no longer stands.</summary>
+        private void OnWingCall(byte home, ulong steamId, byte[] payload)
+        {
+            NexusWingCall call;
+            if (!NexusWingCall.TryDecode(payload, out call))
+            {
+                Log.Warn("NEXUS_WING_UNREADABLE home=" + home + " bytes=" + (payload == null ? 0 : payload.Length));
+                return;
+            }
+            DateTime now = DateTime.UtcNow;
+            if (_wingReadings != null)
+            {
+                _wingReadings.Put(call, now);
+                if (now - _wingReadingsPrunedUtc > NexusWingReadings.Fresh)
+                {
+                    _wingReadingsPrunedUtc = now;
+                    _wingReadings.Prune(now);
+                }
+            }
+            var result = new NexusWingResult
+            {
+                Id = call.Id, Command = call.Command, Antenna = call.Antenna, Identity = call.Identity,
+                StationGrid = call.Station ? call.AntennaGrid : 0,
+            };
+            // A station's call: its grid's hits are the agent's to see, and stamped as it saw them.
+            if (call.Station && call.SHit != 0 && _runtime != null)
+                _runtime.RecordStationAttacker(call.AntennaGrid, call.SHit, now - TimeSpan.FromSeconds(Math.Max(0, call.SHitAgeS)));
+            if (call.Command != 0 && (WingVia)call.Via == WingVia.Host
+                && (_runtime == null || !_runtime.HostCallsFor(call.AOwnerTag)))
+            {
+                // An agent raises only its NPC stations' calls; a player's station calls when its owner says so.
+                result.Message = "Station call refused: not a station the host calls for.";
+                result.Ended = true;
+            }
+            else if (call.Command == 0)
+            {
+                if (_runtime != null && (call.Station ? _runtime.HasStationCall(call.AntennaGrid)
+                                                      : _runtime.HasWingOrder(call.Identity, call.Antenna))) return;
+                result.Ended = true;
+            }
+            else
+            {
+                try
+                {
+                    bool ok = false;
+                    result.Message = _runtime == null ? "Wing refused: the Factions runtime is not ready."
+                        : _runtime.IssueWing(new WingRequest
+                        {
+                            Via = (WingVia)call.Via,
+                            Command = (WingCommand)call.Command,
+                            AntennaEntityId = call.Antenna,
+                            CommanderIdentityId = call.Identity,
+                            CommanderTag = call.Tag,
+                            PresserLock = call.PresserLock,
+                            Crosshair = call.Crosshair,
+                            PilotLock = call.PilotLock,
+                            CombatBlockLock = call.CombatLock,
+                            CockpitRetained = call.Retained,
+                        }, out ok);
+                    result.Ok = ok;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn(ex, "Relayed wing command from server " + home + " failed.");
+                    result.Message = "Wing refused: the server could not answer.";
+                }
+                result.Ended = _runtime == null || (call.Station ? !_runtime.HasStationCall(call.AntennaGrid)
+                                                                 : !_runtime.HasWingOrder(call.Identity, call.Antenna));
+            }
+            if (_nexusRelay != null)
+                _nexusRelay.TrySend(home, Factions.Wire.NexusRelayWire.Write(Factions.Wire.RelayKind.WingResult,
+                    (byte)_nexusServerId, steamId, result.Encode()));
+        }
+
+        private void OnCaptureUpload(byte home, ulong steamId, byte[] payload)
+        {
+            NexusCaptureUpload up;
+            if (!NexusCaptureUpload.TryDecode(payload, out up))
+            {
+                Log.Warn("NEXUS_CAPTURE_UNREADABLE home=" + home + " bytes=" + (payload == null ? 0 : payload.Length));
+                return;
+            }
+            NexusCaptureResult result;
+            try
+            {
+                VRage.Game.MyObjectBuilder_CubeGrid[] grids = string.IsNullOrEmpty(up.GridsXml) ? null : CustomPrefabStore.GridsFromXml(up.GridsXml);
+                result = _runtime == null ? new NexusCaptureResult { Id = up.Id, Message = "Factions runtime not ready." }
+                       : up.Kind == (int)NexusCaptureKind.Design ? _runtime.RegisterRelayedDesign(up, grids, home)
+                       : _runtime.RegisterRelayedCapture(up, grids);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "Relayed capture from server " + home + " failed.");
+                result = new NexusCaptureResult { Id = up.Id, Message = "The scan failed on the server.", Reason = "The server could not answer." };
+            }
+            if (_nexusRelay != null)
+                _nexusRelay.TrySend(home, Factions.Wire.NexusRelayWire.Write(Factions.Wire.RelayKind.CaptureResult,
+                    (byte)_nexusServerId, steamId, result.Encode()));
+        }
+
+        /// <summary>Agent: tells this server's players near each fight the authority resolved, as its
+        /// runtime tells its own -- the chat whisper within a few km, and the HUD notice, in their
+        /// faction's tone, to every linked player within observation range.</summary>
+        private void TellAgentCombat(List<NexusCombatCall> calls)
+        {
+            if (calls == null || _uplinkManager == null) return;
+            var chat = Torch.CurrentSession?.Managers?.GetManager<ChatManagerServer>();
+            for (int i = 0; i < calls.Count; i++)
+            {
+                NexusCombatCall c = calls[i];
+                if (c == null || string.IsNullOrEmpty(c.Sentence)) continue;
+                try
+                {
+                    CombatOutcome o = c.ToOutcome();
+                    if (chat != null)
+                        foreach (ulong steamId in PlayersWithinKm(o.PositionKm, AgentCombatWhisperKm))
+                            chat.SendMessageAsOther("Factions", c.Sentence, VRageMath.Color.CornflowerBlue, steamId);
+                    List<CombatNotice> notices = o.Recipients(PlayersWithinKm, _tuning.ObservationRadiusKm, LocalFactionTagOf);
+                    for (int n = 0; n < notices.Count; n++)
+                    {
+                        if ((_uplinkManager.GrantedFeatures(notices[n].SteamId) & Factions.Wire.WireFeatures.CombatOutcome) == 0) continue;
+                        bool sent = _uplinkManager.Send(notices[n].SteamId, Factions.Wire.FactionsWire.WriteCombatOutcomeNotice(
+                            (Factions.Wire.WireCombatTone)(byte)notices[n].Tone, c.Sentence));
+                        if (UplinkManager.DebugTraffic)
+                            _uplinkManager.WriteTraffic("COMBAT_NOTICE steam=" + notices[n].SteamId + " tone=" + notices[n].Tone
+                                                        + " sent=" + sent + " relayed");
+                    }
+                }
+                catch (Exception ex) { Log.Warn(ex, "Agent combat notice failed."); }
+            }
+        }
+
+        /// <summary>Agent: a combat notice the authority addressed to one player here, on their HUD.</summary>
+        private void SendAgentCombatNotice(long identityId, CombatTone tone, string text)
+        {
+            UplinkManager uplink = _uplinkManager;
+            MySession session = MySession.Static;
+            if (uplink == null || session == null || session.Players == null) return;
+            ulong steamId = session.Players.TryGetSteamId(identityId);
+            if (steamId == 0UL || (uplink.GrantedFeatures(steamId) & Factions.Wire.WireFeatures.CombatOutcome) == 0) return;
+            bool sent = uplink.Send(steamId, Factions.Wire.FactionsWire.WriteCombatOutcomeNotice((Factions.Wire.WireCombatTone)(byte)tone, text));
+            if (UplinkManager.DebugTraffic)
+                uplink.WriteTraffic("COMBAT_NOTICE steam=" + steamId + " tone=" + tone + " sent=" + sent + " kill relayed");
+        }
+
+        /// <summary>The authority's fleet-message radius: close enough to have plausibly seen it.</summary>
+        private const double AgentCombatWhisperKm = 3.0;
+
+        /// <summary>The SE faction tag of a player on this server, or null when they have none.</summary>
+        private static string LocalFactionTagOf(ulong steamId)
+        {
+            MySession session = MySession.Static;
+            if (session == null || session.Players == null || session.Factions == null) return null;
+            long identity = session.Players.TryGetIdentityId(steamId);
+            if (identity == 0) return null;
+            var faction = session.Factions.GetPlayerFaction(identity);
+            return faction != null ? faction.Tag : null;
+        }
+
+        /// <summary>Agent: carries the authority's node stock moves through the blocks they name, once
+        /// each, and answers each player's client. What a deposit removed, and what a withdrawal could
+        /// not place, goes back to the node as a stock event.</summary>
+        private void ApplyAgentStockMoves(List<NexusStockMove> moves)
+        {
+            if (moves == null || _agentHands == null) return;
+            SpatialGraph graph = _agentHands.Graph;
+            StationStoreManager store = _agentHands.Store;
+            for (int i = 0; i < moves.Count; i++)
+            {
+                NexusStockMove m = moves[i];
+                if (m == null || m.Seq <= _agentHands.StockMovesThrough) continue;
+                _agentHands.StockMovesThrough = m.Seq;
+
+                long moved = 0, credit = m.Deposit ? 0 : m.Amount;
+                string message;
+                bool ok = false;
+                SpatialNode node = null;
+                if (graph == null || m.Node == null || !graph.Nodes.TryGetValue(m.Node, out node))
+                    message = "Factions does not know this station.";
+                else
+                {
+                    try
+                    {
+                        ok = PlayerNodeTransferManager.ApplyMove(m, node,
+                            store != null ? (PlayerNodeTransferManager.DefinitionIdResolver)store.TryResolveDefinitionId : null,
+                            out moved, out credit, out message);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn(ex, "Node stock move " + m.Seq + " failed.");
+                        message = "The transfer failed on this server.";
+                        moved = 0;
+                        credit = m.Deposit ? 0 : m.Amount;
+                    }
+                }
+                if (credit > 0)
+                    _agentHands.RecordStoreEvent(new NexusStoreEvent
+                    {
+                        Kind = NexusStoreEventKind.Stock, Node = m.Node, Key = m.Key, Amount = credit,
+                        Steam = m.Steam,
+                    });
+                if (_uplinkManager != null)
+                    _uplinkManager.Send(m.Steam, Factions.Wire.FactionsWire.WriteNodeTransferResult(ok, moved, message));
+            }
         }
 
         /// <summary>Authority: whether an agent has any player connected, by its reports.</summary>
@@ -2650,7 +3247,9 @@ namespace Factions
             NexusNodeSnapshot snapshot = NexusNodeSnapshot.Build(world.Graph.Nodes.Values, _runtime.States, 0);
             snapshot.Munitions = _runtime.StationGunsFromStock;
             snapshot.Loot = FeatureSwitch.IsOn(FeatureSwitch.StationLoot);
+            snapshot.Captures = _runtime.CaptureGeneration;
             StationRecordMirror.Fill(snapshot);
+            NexusNodeSnapshot.FillTradeBars(snapshot, _runtime.States, _runtime.Tuning);
             ulong hash = Fnv64(snapshot.Encode());
             if (_snapshotPayload == null || hash != _snapshotHash)
             {
@@ -2717,8 +3316,20 @@ namespace Factions
             if (_uplinkManager == null || _nexusRelay == null) return;
             _nexusRelay.Drain(_uplinkManager.OnRelayInbound, 256);
             _relayTick++;
+            if (_chatCommands != null && _relayTick % AgentPruneTicks == 0) _chatCommands.Tick(DateTime.UtcNow);
+            if (_agentCaptures != null && _relayTick % AgentPruneTicks == 0) _agentCaptures.Tick(DateTime.UtcNow);
+            if (_agentWing != null)
+            {
+                try { _agentWing.Tick(DateTime.UtcNow); }
+                catch (Exception ex) { Log.Warn(ex, "Agent wing tick failed."); }
+            }
             if (_agentHands != null)
             {
+                SwapAgentCaptures();
+                try { _agentShipAssets?.Tick(); }
+                catch (Exception ex) { Log.Warn(ex, "Agent ship assets tick failed."); }
+                try { _agentRestorationRefs?.Pump(); _agentRestoration?.Pump(); }
+                catch (Exception ex) { Log.Warn(ex, "Agent restoration pump failed."); }
                 // The per-frame halves of what the materialisers start, run on the authority by
                 // FactionRuntime.TickFleetFlight. Without RockContactPhysics an agent's feature rock
                 // never gets a collision grid: its patch declines every build outside a hot set that
@@ -2787,6 +3398,29 @@ namespace Factions
 
         /// <summary>Per frame on the authority: deliver relayed frames to the same handlers a local
         /// client's messages take, and occasionally drop remote clients the cluster no longer sees.</summary>
+        private readonly List<long> _arrivalScratch = new List<long>();
+
+        /// <summary>Authority: a grid an agent flew that Nexus carried into this server's sector is
+        /// flown here again, under the fleet the registry held it for.</summary>
+        private void AdoptArrivalsAsAuthority()
+        {
+            SectorHandover.TakeArrivals(_arrivalScratch);
+            if (_arrivalScratch.Count == 0) return;
+            var routed = _fleetSpawner as VanillaFleetSpawner;
+            if (routed == null) return;
+            foreach (long eid in _arrivalScratch)
+            {
+                if (!_fleetRegistry.Exists(eid)) continue;
+                NexusFleetOrder template;
+                DateTime? damaged;
+                if (!_fleetRegistry.TakeBack(eid, out template, out damaged)) continue;
+                bool ok = routed.AdoptArrival(eid, template.Key, template.Tag, (ActionKind)template.Kind, template.Prefab,
+                                              template.MunitionsId, damaged);
+                Log.Info("NEXUS_FLEET_ADOPTED key=" + template.Key + " eid=" + eid + " kind=" + (ActionKind)template.Kind + " ok=" + ok);
+                _runtime?.ResumeHandedOver(eid, _nexusServerId);
+            }
+        }
+
         private void DrainRelayAsAuthority()
         {
             if (_nexusRole != NexusRole.Authority || _uplinkManager == null || _nexusRelay == null) return;
@@ -2800,6 +3434,11 @@ namespace Factions
             {
                 foreach (byte home in _remotePlayers.Expire(DateTime.UtcNow, RemotePositionMaxAge))
                     Log.Info("RELAY_POSITIONS home=" + home + " state=expired");
+            }
+            if (SectorHandover.Attached)
+            {
+                try { AdoptArrivalsAsAuthority(); }
+                catch (Exception ex) { Log.Warn(ex, "Fleet arrival adoption failed."); }
             }
             if ((_relayTick + 1) % AgentPositionTicks == 0)
             {
@@ -2819,6 +3458,7 @@ namespace Factions
             try { _runtime?.ReleaseFleetControl(); }
             catch (Exception ex) { Log.Warn(ex, "Flight control shutdown failed."); }
             SimGridMarks.Detach();
+            SectorHandover.Detach();
             StoreShipSaleMarks.Store = null;
             StoreShipSaleMarks.ShelfSold = null;
             StationMaterializer.ClaimLog = null;
@@ -2874,6 +3514,23 @@ namespace Factions
             try { _playerCrewOrderManager?.Close(); }
             catch (Exception ex) { Log.Warn(ex, "Player crew order manager close failed."); }
             _playerCrewOrderManager = null;
+            _agentTerminalSurfaces = null;
+            try { _agentCaptures?.Close(); }
+            catch (Exception ex) { Log.Warn(ex, "Agent capture relay close failed."); }
+            _agentCaptures = null;
+            try { _agentWing?.Close(); }
+            catch (Exception ex) { Log.Warn(ex, "Agent wing relay close failed."); }
+            _agentWing = null;
+            WingWorld.Relayed = null;
+            AgentSiege.CombatSink = null;
+            _wingReadings = null;
+            _agentDockSupply = null;
+            try { _agentShipAssets?.Close(); }
+            catch (Exception ex) { Log.Warn(ex, "Agent ship assets close failed."); }
+            _agentShipAssets = null;
+            _agentRestoration = null;
+            _agentRestorationRefs = null;
+            _agentPrices = null;
             _combatOutcomeNotices?.Close();
             _combatOutcomeNotices = null;
             _trespassHailer?.AttachVoice(null);
@@ -2905,6 +3562,9 @@ namespace Factions
             // live owned-id set to consult, and a stale one would withhold rock from the next session.
             FeatureRockMaterializer.Active = null;
             _presenceManager = null;
+            try { _offerReplyRouter?.DetachChat(); }
+            catch (Exception ex) { Log.Warn(ex, "Offer reply router detach threw."); }
+            _offerReplyRouter = null;
             try { _conquerOfferManager?.DetachChat(); }
             catch (Exception ex) { Log.Warn(ex, "ConquerOfferManager detach threw."); }
             _conquerOfferManager = null;
@@ -4154,6 +4814,90 @@ namespace Factions
 
         /// <summary>Authority: books what players did at an agent's Factions stations, once each,
         /// through the same store manager calls this server's own stations make.</summary>
+        /// <summary>Authority: a truce offer or withdrawal a player made on an agent's Factions screen,
+        /// judged there (<see cref="FactionStateChangeCheckPatch"/>).</summary>
+        private void BookAgentPeaceRequest(byte home, NexusStoreEvent e)
+        {
+            FactionState player = _runtime.FindFaction(e.Seller);
+            FactionState npc = _runtime.FindFaction(e.Key);
+            if (player == null || !player.IsPlayerFaction || npc == null || npc.IsPlayerFaction)
+            {
+                Log.Warn("NEXUS_STORE_EVENT_UNBOOKED server=" + home + " kind=Diplomacy player=" + (e.Seller ?? "-")
+                         + " npc=" + (e.Key ?? "-") + " (not a registered player faction and NPC)");
+                return;
+            }
+            if (e.Buy)
+            {
+                Diplomacy.OfferPeace(player, npc.Tag, _runtime.World.UtcNow);
+                FactionDiplomacyPatch.LogPeaceOffered(player, npc, "server" + home, _runtime.World.Tuning);
+                return;
+            }
+            bool withdrawn = VanillaDiplomacy.WithdrawPeace(player, npc.Tag);
+            Log.Info("DIPLOMACY_PEACE_WITHDRAWN player=" + player.Tag + " target=" + npc.Tag
+                     + " offer=" + (withdrawn ? "removed" : "none") + " server=" + home);
+        }
+
+        /// <summary>Authority: a member's conduct on an agent, into the member reputation book as if
+        /// SE had reported it here.</summary>
+        private void BookAgentConduct(byte home, NexusStoreEvent e, long identityId)
+        {
+            MySession session = MySession.Static;
+            MyFaction target = session != null && session.Factions != null ? session.Factions.TryGetFactionByTag(e.Key) : null;
+            if (_reputationManager == null || target == null || identityId == 0)
+            {
+                Log.Warn("NEXUS_STORE_EVENT_UNBOOKED server=" + home + " kind=Conduct npc=" + (e.Key ?? "-")
+                         + " identity=" + identityId + " (no reputation book, faction or identity)");
+                return;
+            }
+            _reputationManager.OnConductAdded(identityId, target.FactionId, (int)e.Amount,
+                (VRage.Game.ModAPI.ReputationChangeReason)e.Blocks, e.Buy);
+        }
+
+        /// <summary>Authority: hulls held for withdrawals staged on agents.</summary>
+        private readonly NexusHullHolds _hullHolds = new NexusHullHolds();
+
+        /// <summary>Authority: holds one hull of a node's stock for a withdrawal an agent's player
+        /// started, before the agent stages it, and answers the hold or the refusal.</summary>
+        private void OnHullAsk(byte home, ulong steamId, byte[] payload)
+        {
+            NexusHullAsk ask;
+            if (!NexusHullAsk.TryDecode(payload, out ask))
+            {
+                Log.Warn("NEXUS_HULL_ASK_UNREADABLE home=" + home + " bytes=" + (payload == null ? 0 : payload.Length));
+                return;
+            }
+            WorldModel world = _runtime != null ? _runtime.World : null;
+            NexusHullAnswer answer = world == null
+                ? new NexusHullAnswer { Id = ask.Id, Node = ask.Node, Prefab = ask.Prefab, Message = "Factions runtime not ready." }
+                : _hullHolds.Take(ask, home, world.Graph, DateTime.UtcNow);
+            if (answer.Ok)
+            {
+                Log.Info("SHIP_WITHDRAW_HELD node=" + ask.Node + " server=" + home + " player=" + ask.Identity
+                         + " prefab=" + ask.Prefab + " hold=" + answer.Hold + " remaining=" + answer.Remaining);
+                _shelfSchedule.MarkDirty(ask.Node);
+            }
+            else
+                Log.Info("SHIP_WITHDRAW_REFUSED node=" + (ask.Node ?? "") + " server=" + home + " player=" + ask.Identity
+                         + " prefab=" + (ask.Prefab ?? "") + " reason=" + answer.Message);
+            if (_nexusRelay != null)
+                _nexusRelay.TrySend(home, Factions.Wire.NexusRelayWire.Write(Factions.Wire.RelayKind.HullAnswer,
+                    (byte)_nexusServerId, steamId, answer.Encode()));
+        }
+
+        /// <summary>Authority: returns the holds no agent settled in time to their stock.</summary>
+        private void LapseHullHolds(WorldModel world)
+        {
+            if (_hullHolds.Count == 0 || world == null) return;
+            List<NexusHullHolds.Hold> lapsed = _hullHolds.Lapse(world.Graph, DateTime.UtcNow);
+            if (lapsed == null) return;
+            for (int i = 0; i < lapsed.Count; i++)
+            {
+                Log.Warn("SHIP_WITHDRAW_HOLD_LAPSED node=" + lapsed[i].Node + " server=" + lapsed[i].Home
+                         + " prefab=" + lapsed[i].Prefab + " hold=" + lapsed[i].Id);
+                _shelfSchedule.MarkDirty(lapsed[i].Node);
+            }
+        }
+
         private void BookAgentStoreEvents(byte home, NexusAgentReport report, NexusStationReply reply)
         {
             long through;
@@ -4161,12 +4905,23 @@ namespace Factions
             reply.StoreThrough = through;
             WorldModel world = _runtime != null ? _runtime.World : null;
             if (world == null || _storeManager == null) return;
+            LapseHullHolds(world);
             for (int i = 0; i < fresh.Count; i++)
             {
                 NexusStoreEvent e = fresh[i];
                 long buyer = LocalIdentityOf(e.Steam, e.Buyer);
                 try
                 {
+                    if (e.Kind == NexusStoreEventKind.Diplomacy)
+                    {
+                        BookAgentPeaceRequest(home, e);
+                        continue;
+                    }
+                    if (e.Kind == NexusStoreEventKind.Conduct)
+                    {
+                        BookAgentConduct(home, e, buyer);
+                        continue;
+                    }
                     if (e.Kind == NexusStoreEventKind.Ship)
                     {
                         ShipSaleDecrement d = _storeManager.OnPlayerBoughtShip(e.Seller, e.Prefab);
@@ -4202,11 +4957,77 @@ namespace Factions
                             if (_debrisAbsorbManager != null)
                                 _debrisAbsorbManager.CreditRemote(node, home, e.Grids, e.Blocks, e.Parts, e.Cargo);
                             break;
+                        case NexusStoreEventKind.Stock:
+                            if (e.Key != null && e.Amount > 0) NodeTransfer.CreditNode(node, e.Key, e.Amount);
+                            break;
+                        case NexusStoreEventKind.Supply:
+                            _storeManager.HandleDockSupplySettled(node, buyer, e.Seller ?? "supply", e.Parts, e.Credits);
+                            break;
+                        case NexusStoreEventKind.Hull:
+                            BookAgentHull(home, node, e, buyer);
+                            break;
                     }
                     _shelfSchedule.MarkDirty(node.Id);
                 }
                 catch (Exception ex) { Log.Warn(ex, "Booking a store event from server " + home + " failed."); }
             }
+        }
+
+        /// <summary>Authority: a hull an agent's player withdrew from a node into grid storage, or sent
+        /// into it with its cargo. The agent checked the stock against its snapshot; a withdrawal the
+        /// stock no longer covers is logged and leaves the stock at zero.</summary>
+        private void BookAgentHull(byte home, SpatialNode node, NexusStoreEvent e, long buyer)
+        {
+            if (string.IsNullOrEmpty(e.Prefab)) return;
+            int stock;
+            if (e.Hold != 0)
+            {
+                NexusHullSettled settled = _hullHolds.Settle(e.Hold, e.Buy, _runtime.World.Graph, node.Id, e.Prefab);
+                node.ShipStock.TryGetValue(e.Prefab, out stock);
+                if (settled == NexusHullSettled.Lapsed && e.Buy)
+                {
+                    Log.Warn("SHIP_WITHDRAW_HOLD_LATE node=" + node.Id + " server=" + home + " player=" + buyer
+                             + " prefab=" + e.Prefab + " hold=" + e.Hold);
+                }
+                else
+                {
+                    Log.Info((e.Buy ? "SHIP_WITHDRAWN" : "SHIP_WITHDRAW_RELEASED") + " node=" + node.Id
+                             + " faction=" + (node.OwnerFactionTag ?? "") + " server=" + home + " player=" + buyer
+                             + " prefab=" + e.Prefab + " hold=" + e.Hold + " settled=" + settled + " remaining=" + stock);
+                    if (_priceUpdater != null && e.Buy) _priceUpdater.RecordActivity(node.Id);
+                    return;
+                }
+            }
+            node.ShipStock.TryGetValue(e.Prefab, out stock);
+            if (e.Buy)
+            {
+                if (stock <= 0)
+                {
+                    Log.Warn("SHIP_WITHDRAW_OVERDRAWN node=" + node.Id + " server=" + home + " player=" + buyer
+                             + " prefab=" + e.Prefab + " stock=0");
+                    return;
+                }
+                if (stock > 1) node.ShipStock[e.Prefab] = stock - 1;
+                else node.ShipStock.Remove(e.Prefab);
+                Log.Info("SHIP_WITHDRAWN node=" + node.Id + " faction=" + (node.OwnerFactionTag ?? "") + " server=" + home
+                         + " player=" + buyer + " prefab=" + e.Prefab + " remaining=" + (stock - 1));
+            }
+            else
+            {
+                long cargoUnits = 0;
+                if (e.Parts != null)
+                    foreach (KeyValuePair<string, long> kv in e.Parts)
+                    {
+                        if (kv.Value <= 0) continue;
+                        NodeTransfer.CreditNode(node, kv.Key, kv.Value);
+                        cargoUnits += kv.Value;
+                    }
+                node.ShipStock[e.Prefab] = stock + 1;
+                Log.Info("SHIP_SENT node=" + node.Id + " faction=" + (node.OwnerFactionTag ?? "") + " server=" + home
+                         + " player=" + buyer + " prefab=" + e.Prefab + " cargokeys=" + (e.Parts == null ? 0 : e.Parts.Count)
+                         + " cargounits=" + cargoUnits);
+            }
+            if (_priceUpdater != null) _priceUpdater.RecordActivity(node.Id);
         }
 
         /// <summary>This server's identity for a player an agent names: by Steam id, which every shard
@@ -4902,6 +5723,86 @@ namespace Factions
         /// <summary>Whether an SE station id belongs to a node this brain owns. Same lookup the
         /// settlement handlers use, so a prefix that skips on false skips nothing they would have
         /// settled.</summary>
+        /// <summary>Agent: the owner tag of the snapshot node whose station is <paramref name="stationId"/>
+        /// and that owner's snapshot row; false when this server stands no such station.</summary>
+        internal bool TryAgentStationOwner(long stationId, out NexusSnapshotFaction owner)
+        {
+            owner = null;
+            AgentHands hands = _agentHands;
+            if (!_sessionReady || hands == null || hands.Graph == null) return false;
+            string nodeId = hands.NodeIdForStation(stationId);
+            SpatialNode node;
+            if (nodeId == null || !hands.Graph.Nodes.TryGetValue(nodeId, out node)) return false;
+            owner = hands.FactionRow(node.OwnerFactionTag);
+            return owner != null;
+        }
+
+        /// <summary>Agent: the authority's snapshot row for <paramref name="tag"/>; null when it is not
+        /// registered, or this is not an agent with hands.</summary>
+        internal NexusSnapshotFaction AgentFactionRow(string tag)
+        {
+            AgentHands hands = _agentHands;
+            return hands != null ? hands.FactionRow(tag) : null;
+        }
+
+        /// <summary>Agent: queues an event for the authority on the store stream. Dropped when this is
+        /// not an agent with hands.</summary>
+        internal void RecordAgentStoreEvent(NexusStoreEvent e)
+        {
+            AgentHands hands = _agentHands;
+            if (hands != null && e != null) hands.RecordStoreEvent(e);
+        }
+
+        /// <summary>Agent: a registered player-faction member's conduct toward an NPC faction, for the
+        /// authority's member reputation book. Conduct by anyone else is not recorded there.</summary>
+        internal void RecordAgentConduct(long identityId, long factionId, int delta, VRage.Game.ModAPI.ReputationChangeReason reason, bool propagate)
+        {
+            AgentHands hands = _agentHands;
+            MySession session = MySession.Static;
+            if (hands == null || delta == 0 || session == null || session.Factions == null) return;
+            MyFaction target = session.Factions.TryGetFactionById(factionId) as MyFaction;
+            MyFaction own = session.Factions.GetPlayerFaction(identityId);
+            if (target == null || own == null) return;
+            NexusSnapshotFaction ownRow = hands.FactionRow(own.Tag);
+            if (ownRow == null || !ownRow.Player) return;
+            ulong steam = session.Players.TryGetSteamId(identityId);
+            hands.RecordConduct(identityId, steam, target.Tag, delta, (int)reason, propagate);
+        }
+
+        /// <summary>A whisper to a player connected to this server.</summary>
+        internal void WhisperLocal(ulong steamId, string message)
+        {
+            if (steamId == 0UL || string.IsNullOrEmpty(message)) return;
+            try
+            {
+                ChatManagerServer chat = Torch?.CurrentSession?.Managers?.GetManager<ChatManagerServer>();
+                if (chat != null) chat.SendMessageAsOther("Factions", message, VRageMath.Color.CornflowerBlue, steamId);
+            }
+            catch (Exception ex) { Log.Warn(ex, "Whispering player " + steamId + " failed."); }
+        }
+
+        /// <summary>Agent: whether the authority's registry has <paramref name="tag"/>.</summary>
+        /// <summary>Agent: the terminal gates' view of the nodes and factions, from the authority's
+        /// snapshot; null before the first one.</summary>
+        internal TerminalWorld AgentTerminalWorld()
+        {
+            AgentHands hands = _agentHands;
+            if (!_sessionReady || hands == null || hands.Graph == null) return null;
+            return new TerminalWorld
+            {
+                Graph = hands.Graph,
+                FindFaction = hands.FindFaction,
+                Judge = (identityId, ownerTag) =>
+                    StoreRefusal.JudgeOnAgent(this, hands.FactionRow(ownerTag), identityId),
+            };
+        }
+
+        internal bool IsAgentRegistryFaction(string tag)
+        {
+            AgentHands hands = _agentHands;
+            return hands != null && hands.IsRegistryFaction(tag);
+        }
+
         internal bool IsFactionsStation(long stationId)
         {
             if (_agentHands != null) return _sessionReady && _agentHands.NodeIdForStation(stationId) != null;
@@ -5154,6 +6055,13 @@ namespace Factions
         /// which rather than having to notice.</summary>
         private const long ThinWeaponSampleShots = 20;
 
+        /// <summary>Verbs an agent runs itself: they act on its own grids, debug switches, tuning,
+        /// frame timings and weapon counts, not on the simulation.</summary>
+        private static readonly HashSet<string> AgentVerbsHere = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "grids", "debris", "debug", "reload", "serverperf", "weapons",
+        };
+
         public bool TryRunFactionsVerb(string line, out string result)
         {
             result = null;
@@ -5303,11 +6211,17 @@ namespace Factions
             }
 
             // A deferred server has no runtime at all; without this every verb reports the
-            // misleading "no session loaded" instead of the actual reason.
-            if (_simulationDeferred)
+            // misleading "no session loaded" instead of the actual reason. An agent hands the verb to
+            // the authority, whose answer lands in this outbox when it comes; the verbs about this
+            // server's own grids and settings run here.
+            if (_simulationDeferred && !AgentVerbsHere.Contains(verb))
             {
-                result = "factions: not simulating on this server -- " + _authorityReason
-                       + ". Run 'factions nexus' for the full decision.";
+                if (_nexusRole == NexusRole.Agent && _chatCommands != null && _chatCommands.ForwardVerb(line.Trim()))
+                    result = "sent to the authority (server " + _tuning.NexusAuthorityServerId
+                           + "); its answer follows in this outbox.";
+                else
+                    result = "factions: not simulating on this server -- " + _authorityReason
+                           + ". Run 'factions nexus' for the full decision.";
                 return true;
             }
 
@@ -6350,9 +7264,9 @@ namespace Factions
         /// separates "nothing was lying around" from "everything was refused".</summary>
         private string HandleDebris(string[] t)
         {
-            if (_debrisAbsorbManager == null) return "debris: runtime not started (no session loaded).";
+            if ((_debrisAbsorbManager ?? _agentDebris) == null) return "debris: runtime not started (no session loaded).";
             bool apply = t.Length > 2 && string.Equals(t[2], "apply", StringComparison.OrdinalIgnoreCase);
-            DebrisAbsorbReport report = _debrisAbsorbManager.Sweep(apply);
+            DebrisAbsorbReport report = (_debrisAbsorbManager ?? _agentDebris).Sweep(apply);
             return DebrisAbsorbManager.Describe(report)
                 + (apply ? "" : "\n  (dry run -- 'factions debris apply' to commit)");
         }

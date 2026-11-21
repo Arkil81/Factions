@@ -78,6 +78,12 @@ namespace Factions
                                     ReputationChangeReason reason, bool propagate)
         {
             if (!__result) return;
+            if (SimulationGate.Deferred)
+            {
+                try { FactionsPlugin.Instance?.RecordAgentConduct(playerIdentityId, factionId, delta, reason, propagate); }
+                catch (Exception ex) { Log.Warn(ex, "Member reputation: queuing conduct for the authority failed."); }
+                return;
+            }
             PlayerReputationManager manager = PlayerReputationManager.Current;
             if (manager == null) return;
             try { manager.OnConductAdded(playerIdentityId, factionId, delta, reason, propagate); }

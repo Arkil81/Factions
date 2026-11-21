@@ -319,10 +319,12 @@ namespace Factions
         private static bool IsRestoreStation(MyRepairServiceComponent component)
         {
             FactionsPlugin plugin = FactionsPlugin.Instance;
-            if (plugin == null || plugin.Restoration == null || SimulationGate.Deferred) return false;
+            if (plugin == null || plugin.Restoration == null) return false;
             var block = component != null ? component.Entity as MyCubeBlock : null;
-            return block != null && block.CubeGrid != null
-                && TerminalAccess.IsFactionsStationGrid(plugin.Runtime, block.CubeGrid.EntityId);
+            if (block == null || block.CubeGrid == null) return false;
+            if (!SimulationGate.Deferred) return TerminalAccess.IsFactionsStationGrid(plugin.Runtime, block.CubeGrid.EntityId);
+            TerminalWorld world = plugin.AgentTerminalWorld();
+            return world != null && TerminalAccess.IsFactionsStationGrid(world.Graph, block.CubeGrid.EntityId);
         }
 
         [HarmonyPostfix]

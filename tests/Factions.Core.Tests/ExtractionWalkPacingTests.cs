@@ -156,10 +156,12 @@ namespace Factions.Core.Tests
         /// replaced, so an index that answered differently would show here even though both paths
         /// share it. At 500 km every hub's catchment is the whole estate; at 250 km each hub has its
         /// own, which is what separates a per-destination index from a shared one. On a mismatch the
-        /// first lines are printed; a deliberate behaviour change recaptures the digest.</summary>
+        /// first lines are printed; a deliberate behaviour change recaptures the digest. The 250 km digest
+        /// was recaptured when ring legs moved to cruise speed (FAC-509): one delivery ETA, N012->N010,
+        /// moved 5.1 s with the ring point its dwell ended on; the line count is unchanged.</summary>
         [Theory]
         [InlineData(500.0, "caef28c048346d285af4768793d1a4b2505425e43a2b2acc8ea54fdc13694331", 823)]
-        [InlineData(250.0, "fb489e82df2ca5f673f3d4cd31c605ffa3c0e375fb880a29b827ce5819e05df6", 820)]
+        [InlineData(250.0, "ef29b9ba6cf25c67b9c431be8aa475a6e07a439171f8977677dbae7a9c84d57e", 820)]
         public void TheSynchronousTick_WritesTheTranscriptTheCodeBeforeThePassIndexesWrote(double radiusKm,
             string Before, int BeforeLines)
         {

@@ -25,14 +25,17 @@ namespace Factions
         private readonly FeatureRockMaterializer _featureRock = new FeatureRockMaterializer();
         private readonly bool _featureRockReady;
         private readonly StationMaterializer _stations = new StationMaterializer();
-        private readonly CustomPrefabStore _customPrefabs;
+        private CustomPrefabStore _customPrefabs;
         private List<FactionState> _factions = new List<FactionState>();
         private readonly Dictionary<string, FactionState> _factionByTag = new Dictionary<string, FactionState>(StringComparer.Ordinal);
+        /// <summary>The snapshot's faction rows, for what the stand-ins do not carry (trade bars).</summary>
+        private readonly Dictionary<string, NexusSnapshotFaction> _factionRows = new Dictionary<string, NexusSnapshotFaction>(StringComparer.OrdinalIgnoreCase);
         private bool _claimsSeeded;
         private readonly AgentStations _economy;
         private readonly AgentSiege _siege;
         private StationRecordMirror.Tally _records;
         private readonly AgentFleets _fleets;
+        private readonly VanillaFleetSpawner _fleetSpawner;
         private static readonly NLog.Logger Log = NLog.LogManager.GetLogger(FactionsPlugin.PluginName);
         /// <summary>This process's id in every report: a new one tells the authority that the
         /// station grids it held for this server are gone.</summary>
@@ -71,6 +74,7 @@ namespace Factions
                 };
             }
             _customPrefabs = customPrefabs;
+            _fleetSpawner = fleetSpawner;
             _asteroids.FieldPlaced = id => _unackedFields.Add(id);
             if (features != null && planets != null)
             {
@@ -139,6 +143,19 @@ namespace Factions
         }
 
         private readonly NexusOutbox<NexusStoreEvent> _storeEvents = new NexusOutbox<NexusStoreEvent>();
+        /// <summary>Conduct since the last report (<see cref="NexusConductTally"/>).</summary>
+        private readonly NexusConductTally _conduct = new NexusConductTally();
+
+        /// <summary>Adds a member's conduct toward an NPC faction to the next report.</summary>
+        public void RecordConduct(long identityId, ulong steamId, string npcTag, int delta, int reason, bool propagate)
+        {
+            _conduct.Add(identityId, steamId, npcTag, delta, reason, propagate);
+        }
+
+        private void FlushConduct()
+        {
+            foreach (NexusStoreEvent e in _conduct.Drain()) _storeEvents.Add(e);
+        }
         private readonly HashSet<string> _shelfMissed = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>Writes the authority's shelves into the station stores here; null until the
@@ -151,11 +168,20 @@ namespace Factions
         {
             if (e == null) return;
             _storeEvents.Add(e);
+            if (e.Kind == NexusStoreEventKind.Diplomacy)
+            {
+                Log.Info("NEXUS_STORE_EVENT kind=Diplomacy player=" + e.Seller + " npc=" + e.Key
+                         + " act=" + (e.Buy ? "offer" : "withdraw") + " sender=" + e.Buyer + " pending=" + _storeEvents.Count);
+                return;
+            }
             Log.Info("NEXUS_STORE_EVENT kind=" + e.Kind + " node=" + (e.Node ?? "-")
                      + (e.Key != null ? " key=" + e.Key + " amount=" + e.Amount + (e.Buy ? " buy" : " sell") : "")
                      + (e.Prefab != null ? " seller=" + e.Seller + " prefab=" + e.Prefab : "")
                      + " credits=" + e.Credits + " buyer=" + e.Buyer + " pending=" + _storeEvents.Count);
         }
+
+        /// <summary>The authority's node stock moves applied here, through this sequence number.</summary>
+        public long StockMovesThrough { get; set; }
 
         /// <summary>The node whose SE station record is <paramref name="stationId"/>, or null.</summary>
         public string NodeIdForStation(long stationId)
@@ -164,6 +190,40 @@ namespace Factions
             foreach (SpatialNode n in _graph.Nodes.Values)
                 if (n.StableStationId == stationId) return n.Id;
             return null;
+        }
+
+        /// <summary>The authority's snapshot row for <paramref name="tag"/>, or null when unregistered.</summary>
+        public NexusSnapshotFaction FactionRow(string tag)
+        {
+            NexusSnapshotFaction row;
+            return tag != null && _factionRows.TryGetValue(tag, out row) ? row : null;
+        }
+
+        /// <summary>The captured designs this server spawns from; null when none could be read.</summary>
+        public CustomPrefabStore CustomPrefabs { get { return _customPrefabs; } }
+
+        /// <summary>Swaps in the captured designs, reloaded after the authority registered one.</summary>
+        public void ReplaceCustomPrefabs(CustomPrefabStore store)
+        {
+            if (store == null) return;
+            _customPrefabs = store;
+            if (_fleetSpawner != null) _fleetSpawner.SetCustomPrefabStore(store);
+        }
+
+        /// <summary>The authority's capture generation in its latest snapshot.</summary>
+        public int Captures { get; private set; }
+
+        /// <summary>The node whose standing station a grid of this server is part of, or null.</summary>
+        public string NodeIdForStationGrid(long gridEntityId)
+        {
+            return _stations.NodeIdForStationGrid(gridEntityId);
+        }
+
+        /// <summary>The authority's faction <paramref name="tag"/> as the snapshot carries it, or null.</summary>
+        public FactionState FindFaction(string tag)
+        {
+            FactionState f;
+            return tag != null && _factionByTag.TryGetValue(tag, out f) ? f : null;
         }
 
         /// <summary>Whether the authority's registry has this faction, which makes its stations'
@@ -188,10 +248,11 @@ namespace Factions
             }
         }
 
-        /// <summary>A yes or no a local player typed; true when it answered the authority's offer.</summary>
-        public bool TryAnswer(long identity, bool yes)
+        /// <summary>A yes or no a local player typed, and the node it names if any; true when it
+        /// answered the authority's offer.</summary>
+        public bool TryAnswer(long identity, bool yes, string nodeId)
         {
-            return _siege.TryAnswer(identity, yes);
+            return _siege.TryAnswer(identity, yes, nodeId);
         }
 
         /// <summary>Releases SE's projectile hooks. The hands are not used after this.</summary>
@@ -232,11 +293,15 @@ namespace Factions
             _sequence = snapshot.Sequence;
             _snapshotUtc = nowUtc;
 
+            Captures = snapshot.Captures;
             _economy.Munitions = snapshot.Munitions;
             _economy.Loot = snapshot.Loot;
             _factions = snapshot.ToFactions();
             _factionByTag.Clear();
             foreach (FactionState f in _factions) _factionByTag[f.Tag] = f;
+            _factionRows.Clear();
+            foreach (NexusSnapshotFaction row in snapshot.Factions)
+                if (row != null && row.Tag != null) _factionRows[row.Tag] = row;
             // Before the claims are seeded: a record created here is a station the claims must cover.
             StationRecordMirror.Tally records = StationRecordMirror.Reconcile(snapshot, _stations);
             if (records.Any || (records.NoFaction > 0 && _records.NoFaction != records.NoFaction))
@@ -286,6 +351,7 @@ namespace Factions
         /// the session, which is how the authority learns this server restarted.</summary>
         public NexusAgentReport BuildReport()
         {
+            FlushConduct();
             var report = new NexusAgentReport
             {
                 Session = _session,
@@ -295,6 +361,7 @@ namespace Factions
                 Transfers = _transfers.Pending(),
                 StoreEvents = _storeEvents.Pending(),
                 NoticesThrough = _siege.NoticesThrough,
+                StockMovesThrough = StockMovesThrough,
                 Observed = _stations.ObservedNodes(),
             };
             // Fleets wait for the first snapshot: until it, nothing here ticks them.

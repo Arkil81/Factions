@@ -211,6 +211,29 @@ namespace Factions.Core.Tests
             Assert.False(p.TryGetBody("RealGasGiant", 0, out ignored));
         }
 
+        /// <summary>SE checks a body's bot cap only before a wave, so a wave spawns in full: the
+        /// shipped waves are small, and every rule says so rather than taking SE's default.</summary>
+        [Fact]
+        public void ShippedRecipe_WavesAreSmall()
+        {
+            string error;
+            WorldRecipe r = WorldRecipe.Parse(System.IO.File.ReadAllText(
+                TestSupport.RepoFile("instance/worlds/awl-factions-genesis/world_recipe.json")), out error);
+            Assert.True(r != null, error);
+            int rules = 0;
+            foreach (RecipePlanet planet in r.Planets)
+            {
+                if (planet.Fauna == null) continue;
+                foreach (FaunaRule rule in planet.Fauna)
+                {
+                    rules++;
+                    Assert.True(rule.Wave != null && rule.Wave.Length == 2, planet.Name + ": no Wave authored");
+                    Assert.True(rule.Wave[1] <= 6, planet.Name + ": a wave of up to " + rule.Wave[1]);
+                }
+            }
+            Assert.Equal(4, rules);
+        }
+
         [Fact]
         public void FaunaWithoutDefinition_IsRejected()
         {

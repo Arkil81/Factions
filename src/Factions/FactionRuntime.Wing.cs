@@ -23,6 +23,9 @@ namespace Factions
         public long CockpitRetained;
         /// <summary>A bench command reaches only this scenario's fleets.</summary>
         public string BenchLabel;
+        /// <summary>The commander's SE faction tag as the server they are on read it, for a command
+        /// relayed from a Nexus agent; null to read it here.</summary>
+        public string CommanderTag;
     }
 
     /// <summary>
@@ -71,6 +74,13 @@ namespace Factions
             public Vec3 PosM;
         }
 
+        /// <summary>Whether <paramref name="commanderIdentityId"/>'s order stands, on that antenna.</summary>
+        internal bool HasWingOrder(long commanderIdentityId, long antennaEntityId)
+        {
+            WingOrder order;
+            return _wingOrders.TryGetValue(commanderIdentityId, out order) && order.AntennaEntityId == antennaEntityId;
+        }
+
         /// <summary>True while a hull obeys a commander's order: its fleet's own flight leaves it alone.</summary>
         internal bool IsCommanded(long entityId)
         {
@@ -99,11 +109,14 @@ namespace Factions
                 {
                     Via = req.Via,
                     AntennaEntityId = req.AntennaEntityId,
-                    PresserIdentityId = req.Via == WingVia.Block ? 0 : req.CommanderIdentityId,
+                    // A block's or the host's call has no presser: an agent raising an NPC station's
+                    // own call names the antenna's owner, as the call reads it anyway.
+                    PresserIdentityId = req.Via == WingVia.Block || req.Via == WingVia.Host ? 0 : req.CommanderIdentityId,
+                    PresserTag = req.Via == WingVia.Block || req.Via == WingVia.Host ? null : req.CommanderTag,
                     BenchLabel = req.BenchLabel,
                 }, out ok);
             DateTime now = DateTime.UtcNow;
-            string tag = WingWorld.FactionTagOf(req.CommanderIdentityId);
+            string tag = req.CommanderTag ?? WingWorld.FactionTagOf(req.CommanderIdentityId);
             FactionState own = tag != null ? FindState(tag) : null;
             if (own == null || !own.IsPlayerFaction)
                 return RefuseWing(req, tag, WingRefusal.NoPlayerFaction);

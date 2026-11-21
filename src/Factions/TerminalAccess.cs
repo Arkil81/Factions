@@ -38,6 +38,32 @@ namespace Factions
     /// act at a station: one of them scans a design, the other rebuilds the grid the first one
     /// scanned, and both are standing at the same block when they do it.</para>
     /// </summary>
+    /// <summary>
+    /// The nodes and factions a terminal gate reads, from whichever server holds them: the runtime's
+    /// on a standalone server or the Nexus authority, the authority's snapshot on a Nexus agent
+    /// (<see cref="FactionsPlugin.AgentTerminalWorld"/>). The block, the player and the distance are
+    /// always this server's own.
+    /// </summary>
+    public sealed class TerminalWorld
+    {
+        public SpatialGraph Graph;
+        /// <summary>The registered faction with this tag, or null.</summary>
+        public Func<string, FactionState> FindFaction;
+        /// <summary>Whether the owner of a node refuses this customer its store.</summary>
+        public Func<long, string, StoreAccessDecision> Judge;
+
+        public static TerminalWorld Of(FactionRuntime runtime)
+        {
+            if (runtime == null || runtime.World == null || runtime.World.Graph == null) return null;
+            return new TerminalWorld
+            {
+                Graph = runtime.World.Graph,
+                FindFaction = runtime.FindFaction,
+                Judge = (identityId, ownerTag) => StoreRefusal.Judge(runtime, identityId, ownerTag),
+            };
+        }
+    }
+
     public static class TerminalAccess
     {
         /// <summary>
@@ -50,9 +76,16 @@ namespace Factions
         public static bool TryAuthorise(FactionRuntime runtime, ulong steamId, long terminalEntityId,
             out TerminalContext ctx, out string refusal)
         {
+            return TryAuthorise(TerminalWorld.Of(runtime), steamId, terminalEntityId, out ctx, out refusal);
+        }
+
+        /// <summary>As above, against either server's view of the nodes (<see cref="TerminalWorld"/>).</summary>
+        public static bool TryAuthorise(TerminalWorld world, ulong steamId, long terminalEntityId,
+            out TerminalContext ctx, out string refusal)
+        {
             ctx = null;
 
-            if (runtime == null || runtime.World == null || runtime.World.Graph == null
+            if (world == null || world.Graph == null
                 || MySession.Static == null || MySession.Static.Factions == null)
             {
                 refusal = "Factions is not ready on this server.";
@@ -68,7 +101,7 @@ namespace Factions
             long identityId = player.IdentityId;
 
             MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(identityId);
-            FactionState faction = seFaction != null ? runtime.FindFaction(seFaction.Tag) : null;
+            FactionState faction = seFaction != null ? world.FindFaction(seFaction.Tag) : null;
             if (faction == null || !faction.IsPlayerFaction)
             {
                 refusal = "Your faction is not registered with Factions yet.";
@@ -93,7 +126,7 @@ namespace Factions
             long stationId = block.CubeGrid != null
                 ? StationIdOfGrid(block.CubeGrid.EntityId)
                 : 0;
-            SpatialNode node = stationId != 0 ? FindNodeByStation(runtime, stationId) : null;
+            SpatialNode node = stationId != 0 ? FindNodeByStation(world.Graph, stationId) : null;
             if (node == null)
             {
                 refusal = "This station is not one of your faction's.";
@@ -139,9 +172,16 @@ namespace Factions
         public static bool TryAuthoriseCustomer(FactionRuntime runtime, ulong steamId, long terminalEntityId,
             out TerminalContext ctx, out string refusal)
         {
+            return TryAuthoriseCustomer(TerminalWorld.Of(runtime), steamId, terminalEntityId, out ctx, out refusal);
+        }
+
+        /// <summary>As above, against either server's view of the nodes (<see cref="TerminalWorld"/>).</summary>
+        public static bool TryAuthoriseCustomer(TerminalWorld world, ulong steamId, long terminalEntityId,
+            out TerminalContext ctx, out string refusal)
+        {
             ctx = null;
 
-            if (runtime == null || runtime.World == null || runtime.World.Graph == null
+            if (world == null || world.Graph == null
                 || MySession.Static == null || MySession.Static.Factions == null)
             {
                 refusal = "Factions is not ready on this server.";
@@ -180,7 +220,7 @@ namespace Factions
             long stationId = block.CubeGrid != null
                 ? StationIdOfGrid(block.CubeGrid.EntityId)
                 : 0;
-            SpatialNode node = stationId != 0 ? FindNodeByStation(runtime, stationId) : null;
+            SpatialNode node = stationId != 0 ? FindNodeByStation(world.Graph, stationId) : null;
             if (node == null || string.IsNullOrEmpty(node.OwnerFactionTag)
                 || NeutralFaction.IsClaimable(node.OwnerFactionTag))
             {
@@ -188,7 +228,7 @@ namespace Factions
                 return false;
             }
 
-            StoreAccessDecision bar = StoreRefusal.Judge(runtime, identityId, node.OwnerFactionTag);
+            StoreAccessDecision bar = world.Judge(identityId, node.OwnerFactionTag);
             if (bar.Refused)
             {
                 StoreRefusal.Trace("dock", node, identityId, bar);
@@ -202,7 +242,7 @@ namespace Factions
                 Player = player,
                 IdentityId = identityId,
                 Identity = MySession.Static.Players.TryGetIdentity(identityId),
-                Faction = seFaction != null ? runtime.FindFaction(seFaction.Tag) : null,
+                Faction = seFaction != null ? world.FindFaction(seFaction.Tag) : null,
                 Block = block,
                 Node = node,
             };
@@ -214,23 +254,27 @@ namespace Factions
         /// Factions runs: an SE station that is a node with an owner other than the claimable
         /// neutral faction — the node <see cref="TryAuthoriseCustomer"/> sells from. At such a
         /// station the Repair tab is Restore's (<see cref="RestorationService"/>).</summary>
-        public static bool IsFactionsStationTerminal(FactionRuntime runtime, long terminalEntityId)
+        public static bool IsFactionsStationTerminal(SpatialGraph graph, long terminalEntityId)
         {
-            if (runtime == null || runtime.World == null || runtime.World.Graph == null
-                || MySession.Static == null || MySession.Static.Factions == null) return false;
+            if (graph == null || MySession.Static == null || MySession.Static.Factions == null) return false;
             MyCubeBlock block;
             if (!MyEntities.TryGetEntityById<MyCubeBlock>(terminalEntityId, out block, false)
                 || block == null || block.MarkedForClose || !IsServicesTerminal(block) || block.CubeGrid == null) return false;
-            return IsFactionsStationGrid(runtime, block.CubeGrid.EntityId);
+            return IsFactionsStationGrid(graph, block.CubeGrid.EntityId);
         }
 
         /// <summary>As <see cref="IsFactionsStationTerminal"/>, for the station grid itself.</summary>
         public static bool IsFactionsStationGrid(FactionRuntime runtime, long stationGridEntityId)
         {
-            if (runtime == null || runtime.World == null || runtime.World.Graph == null
-                || MySession.Static == null || MySession.Static.Factions == null) return false;
+            return runtime != null && runtime.World != null && IsFactionsStationGrid(runtime.World.Graph, stationGridEntityId);
+        }
+
+        /// <summary>As above, over any server's graph: the runtime's, or a Nexus agent's snapshot.</summary>
+        public static bool IsFactionsStationGrid(SpatialGraph graph, long stationGridEntityId)
+        {
+            if (graph == null || MySession.Static == null || MySession.Static.Factions == null) return false;
             long stationId = StationIdOfGrid(stationGridEntityId);
-            SpatialNode node = stationId != 0 ? FindNodeByStation(runtime, stationId) : null;
+            SpatialNode node = stationId != 0 ? FindNodeByStation(graph, stationId) : null;
             return node != null && !string.IsNullOrEmpty(node.OwnerFactionTag) && !NeutralFaction.IsClaimable(node.OwnerFactionTag);
         }
 
@@ -272,7 +316,13 @@ namespace Factions
 
         internal static SpatialNode FindNodeByStation(FactionRuntime runtime, long stationId)
         {
-            foreach (SpatialNode n in runtime.World.Graph.Nodes.Values)
+            return FindNodeByStation(runtime.World.Graph, stationId);
+        }
+
+        internal static SpatialNode FindNodeByStation(SpatialGraph graph, long stationId)
+        {
+            if (graph == null) return null;
+            foreach (SpatialNode n in graph.Nodes.Values)
                 if (n.StableStationId == stationId) return n;
             return null;
         }

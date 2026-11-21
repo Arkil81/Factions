@@ -14,6 +14,34 @@ namespace Factions.Core
         Expedite = 5,
         /// <summary>Wreckage the agent's debris sweep closed near a node, for the node's stock.</summary>
         Debris = 6,
+        /// <summary>Node stock a player carried in at a block, or a withdrawal's units that did not
+        /// fit and go back: <see cref="NexusStoreEvent.Amount"/> of <see cref="NexusStoreEvent.Key"/>
+        /// is credited to the node.</summary>
+        Stock = 7,
+        /// <summary>A player faction's truce request to a Factions-managed NPC, made on the vanilla
+        /// Factions screen and judged on the agent: <see cref="NexusStoreEvent.Seller"/> is the player
+        /// faction's tag, <see cref="NexusStoreEvent.Key"/> the NPC's, <see cref="NexusStoreEvent.Buy"/>
+        /// true to offer peace and false to withdraw the offer, <see cref="NexusStoreEvent.Buyer"/>
+        /// the sender's identity. No node.</summary>
+        Diplomacy = 8,
+        /// <summary>A registered player-faction member's personal reputation conduct toward an NPC
+        /// faction, summed per member, faction, reason and propagation since the last report:
+        /// <see cref="NexusStoreEvent.Key"/> the NPC's tag, <see cref="NexusStoreEvent.Amount"/> the
+        /// raw delta SE was asked for, <see cref="NexusStoreEvent.Blocks"/> the SE reason as a number,
+        /// <see cref="NexusStoreEvent.Buy"/> whether it propagates, <see cref="NexusStoreEvent.Buyer"/>
+        /// the member's identity here. No node.</summary>
+        Conduct = 9,
+        /// <summary>A Services Terminal refuel, rearm or restore paid for at the station:
+        /// <see cref="NexusStoreEvent.Parts"/> the units delivered per key, out of node stock,
+        /// <see cref="NexusStoreEvent.Credits"/> what the player paid, <see cref="NexusStoreEvent.Seller"/>
+        /// the service ("refuel", "rearm", "restore").</summary>
+        Supply = 10,
+        /// <summary>A hull out of a player faction's node stock into grid storage (<see cref="NexusStoreEvent.Buy"/>
+        /// true), or a ship sent into it (false) with <see cref="NexusStoreEvent.Parts"/> its cargo,
+        /// credited to the node. <see cref="NexusStoreEvent.Prefab"/> is the hull's design. With
+        /// <see cref="NexusStoreEvent.Hold"/> set, it settles that hold (<see cref="NexusHullHolds"/>):
+        /// withdrawn when <see cref="NexusStoreEvent.Buy"/>, released when not.</summary>
+        Hull = 11,
     }
 
     /// <summary>
@@ -53,6 +81,8 @@ namespace Factions.Core
         public Dictionary<string, long> Parts;
         /// <summary>Salvage and debris: cargo aboard the wreck.</summary>
         public Dictionary<string, long> Cargo;
+        /// <summary>Hull: the authority's hold the withdrawal was staged under; zero for none.</summary>
+        public long Hold;
 
         long INexusSequenced.Sequence { get { return Seq; } set { Seq = value; } }
     }
@@ -128,5 +158,53 @@ namespace Factions.Core
     /// <summary>The authority's mark of each agent's store events.</summary>
     public sealed class NexusStoreInbox : NexusInbox<NexusStoreEvent>
     {
+    }
+
+    /// <summary>
+    /// An agent's conduct events between reports, summed per member, NPC faction, reason and
+    /// propagation: SE's conduct hook fires once per hit in a fight, and the authority books the
+    /// sum through the same path as one call (<see cref="NexusStoreEventKind.Conduct"/>).
+    /// </summary>
+    public sealed class NexusConductTally
+    {
+        private readonly Dictionary<string, NexusStoreEvent> _rows = new Dictionary<string, NexusStoreEvent>(StringComparer.Ordinal);
+        private readonly List<string> _order = new List<string>();
+
+        public int Count { get { return _rows.Count; } }
+
+        public void Add(long identityId, ulong steamId, string npcTag, int delta, int reason, bool propagate)
+        {
+            if (delta == 0 || string.IsNullOrEmpty(npcTag)) return;
+            string key = identityId + "|" + npcTag.ToUpperInvariant() + "|" + reason + "|" + (propagate ? "1" : "0");
+            NexusStoreEvent e;
+            if (!_rows.TryGetValue(key, out e))
+            {
+                e = new NexusStoreEvent
+                {
+                    Kind = NexusStoreEventKind.Conduct, Key = npcTag, Blocks = reason, Buy = propagate,
+                    Buyer = identityId, Steam = steamId,
+                };
+                _rows[key] = e;
+                _order.Add(key);
+            }
+            e.Amount += delta;
+        }
+
+        /// <summary>The rows in first-seen order, each clamped to an int, net-zero rows dropped; the
+        /// tally is empty afterwards.</summary>
+        public List<NexusStoreEvent> Drain()
+        {
+            var list = new List<NexusStoreEvent>(_order.Count);
+            foreach (string key in _order)
+            {
+                NexusStoreEvent e = _rows[key];
+                if (e.Amount == 0) continue;
+                e.Amount = Math.Max(int.MinValue, Math.Min(int.MaxValue, e.Amount));
+                list.Add(e);
+            }
+            _rows.Clear();
+            _order.Clear();
+            return list;
+        }
     }
 }

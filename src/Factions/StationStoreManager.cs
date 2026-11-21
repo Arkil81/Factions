@@ -72,6 +72,15 @@ namespace Factions
         // cadence over every station, so a per-node allocation here is a per-tick allocation.
         private readonly List<StationListing> _listings = new List<StationListing>();
 
+        /// <summary>Nexus agent: the rows of each node's last shelf from the authority, which prices
+        /// them; what this server's own offers are read from.</summary>
+        private readonly Dictionary<string, List<StationListing>> _relayedRows =
+            new Dictionary<string, List<StationListing>>(StringComparer.Ordinal);
+
+        /// <summary>Nexus agent: a refuel, rearm or restore settled here, for the authority to book.
+        /// Null elsewhere, where <see cref="HandleDockSupplySettled"/> books it itself.</summary>
+        internal Action<SpatialNode, long, string, IDictionary<string, long>, long> RemoteSupplySettled;
+
         private Dictionary<long, MyFactionStation> _stationIndex;
         private DateTime _stationIndexBuiltUtc;
 
@@ -506,6 +515,7 @@ namespace Factions
             if (node == null || shelf == null || node.StableStationId == 0 || MySession.Static == null) return false;
             MyFactionStation station = FindStation(node);
             if (station == null) return false;
+            _relayedRows[node.Id] = shelf.Rows != null ? new List<StationListing>(shelf.Rows) : new List<StationListing>();
             station.StoreItems.Clear();
             int offers = 0, orders = 0, oreOrders = 0;
             if (shelf.Rows != null) WriteRows(station, node.Id, shelf.Rows, out offers, out orders, out oreOrders);
@@ -716,8 +726,16 @@ namespace Factions
         {
             var offers = new Dictionary<string, StationListing>(StringComparer.Ordinal);
             if (node == null) return offers;
-            var rows = new List<StationListing>();
-            BuildListings(node, rows);
+            List<StationListing> rows;
+            if (_world == null)
+            {
+                if (!_relayedRows.TryGetValue(node.Id, out rows)) return offers;
+            }
+            else
+            {
+                rows = new List<StationListing>();
+                BuildListings(node, rows);
+            }
             for (int i = 0; i < rows.Count; i++)
                 if (rows[i].Side == StationListingSide.Offer && !string.IsNullOrEmpty(rows[i].InvKey))
                     offers[rows[i].InvKey] = rows[i];
@@ -735,6 +753,12 @@ namespace Factions
             IDictionary<string, long> unitsByKey, long credits)
         {
             if (node == null || string.IsNullOrEmpty(node.OwnerFactionTag) || unitsByKey == null) return;
+            if (_world == null)
+            {
+                SpendRelayedRows(node.Id, unitsByKey);
+                if (RemoteSupplySettled != null) RemoteSupplySettled(node, buyerIdentityId, service, unitsByKey, credits);
+                return;
+            }
 
             long units = 0;
             foreach (KeyValuePair<string, long> kv in unitsByKey)
@@ -751,6 +775,26 @@ namespace Factions
                    + " ledger=" + _world.GetTreasury(node.OwnerFactionTag));
 
             if (credits > 0) AttributeTrade(buyerIdentityId, node.OwnerFactionTag, credits, true);
+        }
+
+        /// <summary>Nexus agent: takes what a settled service delivered off the offer rows it was sold
+        /// from, so a second purchase before the authority's next shelf cannot sell the same units.
+        /// The authority's shelf replaces the rows once it has booked the sale.</summary>
+        private void SpendRelayedRows(string nodeId, IDictionary<string, long> unitsByKey)
+        {
+            List<StationListing> rows;
+            if (!_relayedRows.TryGetValue(nodeId, out rows)) return;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                StationListing row = rows[i];
+                long units;
+                if (row.Side != StationListingSide.Offer || row.InvKey == null || !unitsByKey.TryGetValue(row.InvKey, out units)
+                    || units <= 0) continue;
+                long per = Math.Max(1L, ItemCredits.UnitsPerPricedUnit(row.InvKey));
+                long spent = (units + per - 1) / per;
+                row.Quantity = Math.Max(0L, row.Quantity - spent);
+                rows[i] = row;
+            }
         }
 
         /// <summary>Reputation attribution, after the goods and the credits have landed: a model that

@@ -91,9 +91,28 @@ namespace Factions
         private static readonly MethodInfo CanPlaceTopMethod = AccessTools.Method(typeof(MyMechanicalConnectionBlockBase),
             "CanPlaceTop", Type.EmptyTypes);
 
-        private readonly FactionRuntime _runtime;
         private readonly UplinkManager _uplink;
         private readonly StationStoreManager _store;
+        private readonly Func<TerminalWorld> _world;
+        private readonly Func<RestorationReferences> _refs;
+        private readonly Func<string, long> _itemValue;
+        private readonly RegisterDesign _register;
+
+        /// <summary>Registers <paramref name="live"/> as its own design, its fee paid to the owner of
+        /// <paramref name="venue"/>'s node; false when it was not written, so it lasts until restart.</summary>
+        internal delegate bool RegisterDesign(RestorationLiveGroup live, long payerIdentity, ulong payerSteam,
+                                              SpatialNode node, long fee, out string fingerprint);
+
+        private RestorationReferences Refs { get { return _refs(); } }
+
+        private SpatialGraph GraphHere
+        {
+            get
+            {
+                TerminalWorld w = _world();
+                return w != null ? w.Graph : null;
+            }
+        }
 
         private readonly Dictionary<long, Job> _jobs = new Dictionary<long, Job>();
         private readonly Dictionary<long, CachedTarget> _targets = new Dictionary<long, CachedTarget>();
@@ -153,8 +172,27 @@ namespace Factions
         }
 
         public RestorationService(FactionRuntime runtime, UplinkManager uplink, StationStoreManager store)
+            : this(() => TerminalWorld.Of(runtime), () => runtime.RestorationRefs,
+                   key => runtime.World != null ? runtime.World.ItemUnitValue(key) : 0,
+                   (RestorationLiveGroup live, long payer, ulong steam, SpatialNode node, long fee, out string fingerprint) =>
+                   {
+                       if (node != null && !string.IsNullOrEmpty(node.OwnerFactionTag) && runtime.World != null)
+                           runtime.World.Earn(node.OwnerFactionTag, fee);
+                       return runtime.CommitRegistration(live, payer, fee, out fingerprint);
+                   },
+                   uplink, store)
         {
-            _runtime = runtime;
+        }
+
+        /// <param name="itemValue">A component's value at the world's prices, by its stripped key;
+        /// 0 when unknown, and the bank then does not sell it.</param>
+        public RestorationService(Func<TerminalWorld> world, Func<RestorationReferences> refs, Func<string, long> itemValue,
+                                  RegisterDesign register, UplinkManager uplink, StationStoreManager store)
+        {
+            _world = world;
+            _refs = refs;
+            _itemValue = itemValue;
+            _register = register;
             _uplink = uplink;
             _store = store;
             if (_uplink == null) return;
@@ -185,7 +223,7 @@ namespace Factions
             if (_store == null) { refusal = "Factions is not ready on this server."; return false; }
 
             TerminalContext ctx;
-            if (!TerminalAccess.TryAuthoriseCustomer(_runtime, steamId, terminalEntityId, out ctx, out refusal)) return false;
+            if (!TerminalAccess.TryAuthoriseCustomer(_world(), steamId, terminalEntityId, out ctx, out refusal)) return false;
 
             if (!MyEntities.TryGetEntityById<MyCubeGrid>(gridEntityId, out grid, false)
                 || grid == null || grid.MarkedForClose || grid.Closed)
@@ -261,7 +299,7 @@ namespace Factions
             if (!Granted(steamId)) return;
 
             WireRestoreQuote reply;
-            bool managed = TerminalAccess.IsFactionsStationTerminal(_runtime, terminalEntityId);
+            bool managed = TerminalAccess.IsFactionsStationTerminal(GraphHere, terminalEntityId);
             try
             {
                 if (!managed || gridEntityId == 0)
@@ -302,7 +340,7 @@ namespace Factions
                 if (!unmarked) return Refusal(terminalEntityId, gridEntityId, "No design for " + NameOf(grid) + ": " + error);
                 string matchRefusal;
                 long gridId = grid.EntityId;
-                if (!_runtime.StartRestoreMatchFor(grid, (t, why) => OnMatched(steamId, terminalEntityId, gridId, t, why), out matchRefusal))
+                if (!Refs.StartRestoreMatchFor(grid, (t, why) => OnMatched(steamId, terminalEntityId, gridId, t, why), out matchRefusal))
                     return Refusal(terminalEntityId, gridEntityId, "Cannot find the design of " + NameOf(grid) + " now: " + matchRefusal);
                 return new WireRestoreQuote
                 {
@@ -400,14 +438,14 @@ namespace Factions
             RestorationLiveGroup live;
             string refusal;
             WireRestoreQuote q;
-            if (!_runtime.CheckRegistrable(grid, false, out live, out refusal))
+            if (!Refs.CheckRegistrable(grid, false, out live, out refusal))
             {
                 q = Refusal(terminalEntityId, grid.EntityId, lead + " Registering it is " + refusal);
             }
             else
             {
                 string fingerprint = RestorationDiff.Fingerprint(live.Assembly.Grids);
-                string registered = _runtime.RegisteredFingerprint(grid.EntityId);
+                string registered = Refs.RegisteredFingerprint(grid.EntityId);
                 if (registered != null && string.Equals(registered, fingerprint, StringComparison.Ordinal))
                 {
                     q = Refusal(terminalEntityId, grid.EntityId, lead + " Its design is registered as it stands.");
@@ -593,7 +631,7 @@ namespace Factions
         private bool TryTarget(MyCubeGrid grid, List<RestorationBlock> current, out RestorationTarget target, out bool unmarked,
             out string error)
         {
-            if (_runtime.TryRestorationTarget(grid, null, current, out target, out unmarked, out error)) return true;
+            if (Refs.TryRestorationTarget(grid, null, current, out target, out unmarked, out error)) return true;
             if (!unmarked) return false;
             CachedTarget cached;
             if (_targets.TryGetValue(grid.EntityId, out cached) && DateTime.UtcNow - cached.Utc <= QuoteTtl)
@@ -676,7 +714,7 @@ namespace Factions
             }
             RestorationLiveGroup live;
             string refusal;
-            if (!_runtime.CheckRegistrable(grid, false, out live, out refusal))
+            if (!Refs.CheckRegistrable(grid, false, out live, out refusal))
             {
                 message = "Registering " + NameOf(grid) + " is " + refusal;
                 return false;
@@ -687,11 +725,8 @@ namespace Factions
                 message = "Registering costs " + Num(RegisterFee) + " credits; your balance is " + Num(balance) + ".";
                 return false;
             }
-            if (venue.Node != null && !string.IsNullOrEmpty(venue.Node.OwnerFactionTag) && _runtime.World != null)
-                _runtime.World.Earn(venue.Node.OwnerFactionTag, RegisterFee);
-
             string fingerprint;
-            bool persisted = _runtime.CommitRegistration(live, venue.PayerIdentity, RegisterFee, out fingerprint);
+            bool persisted = _register(live, venue.PayerIdentity, venue.PayerSteam, venue.Node, RegisterFee, out fingerprint);
             _targets.Remove(grid.EntityId);
             message = NameOf(grid) + "'s design is registered: " + live.BlockCount + " blocks"
                     + (live.Grids.Count > 1 ? " in " + live.Grids.Count + " grids" : "") + ". It can now be restored to exactly this."
@@ -996,12 +1031,10 @@ namespace Factions
         /// premium. A component the price catalogue does not know has no bank price.</summary>
         private void FillBankPrices(Dictionary<string, long> into, IEnumerable<string> components)
         {
-            WorldModel world = _runtime.World;
-            if (world == null) return;
             foreach (string sub in components)
             {
                 if (into.ContainsKey(sub)) continue;
-                long value = world.ItemUnitValue(ItemPriceResolver.StripInventoryPrefix(ComponentPrefix + sub));
+                long value = _itemValue(ItemPriceResolver.StripInventoryPrefix(ComponentPrefix + sub));
                 if (value > 0) into[sub] = RestorationBilling.BankUnitPrice(value);
             }
         }
@@ -1455,7 +1488,7 @@ namespace Factions
             MyCubeGrid grid;
             long identityId;
             string error;
-            if (!_runtime.TryFindRestoreTarget(target, out grid, out identityId, out error)) return "restore: " + error;
+            if (!Refs.TryFindRestoreTarget(target, out grid, out identityId, out error)) return "restore: " + error;
             if (grid.IsStatic) return "restore: grid " + grid.EntityId + " is a station.";
             if (identityId == 0 && grid.BigOwners.Count > 0) identityId = grid.BigOwners[0];
             if (identityId == 0) return "restore: grid " + grid.EntityId + " has no owner to pay.";
@@ -1478,7 +1511,7 @@ namespace Factions
                 if (!unmarked) return "restore: grid " + grid.EntityId + ": " + error;
                 string refusal;
                 long gridId = grid.EntityId;
-                if (!_runtime.StartRestoreMatchFor(grid, (matched, why) => OnBenchMatched(gridId, matched, why), out refusal))
+                if (!Refs.StartRestoreMatchFor(grid, (matched, why) => OnBenchMatched(gridId, matched, why), out refusal))
                     return "restore: " + refusal;
                 return "restore: grid " + grid.EntityId + ": nothing marks its design; matching. The result follows in the bridge "
                      + "outbox; run the command again (with confirm) once it reports.";
@@ -1530,7 +1563,7 @@ namespace Factions
                 if (g == null || g == grid || g.Closed) continue;
                 IMyFactionStation station = MySession.Static.Factions.GetStationByGridId(g.EntityId);
                 if (station == null) continue;
-                SpatialNode node = TerminalAccess.FindNodeByStation(_runtime, station.Id);
+                SpatialNode node = TerminalAccess.FindNodeByStation(GraphHere, station.Id);
                 if (node == null || string.IsNullOrEmpty(node.OwnerFactionTag)) continue;
                 foreach (MyCubeBlock block in g.GetFatBlocks())
                 {

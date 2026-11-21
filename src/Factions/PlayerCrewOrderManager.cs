@@ -19,7 +19,8 @@ namespace Factions
     /// </list>
     ///
     /// <para>Withheld from a relayed client (<see cref="UplinkManager.RemoteWithheldFeatures"/>): the
-    /// seat and its crew are entities in the caller's own sector.</para>
+    /// seat and its crew are entities in the caller's own sector. A Nexus agent serves it itself
+    /// (<see cref="UplinkManager.AgentLocalFeatures"/>): it needs no runtime.</para>
     /// </summary>
     internal sealed class PlayerCrewOrderManager
     {

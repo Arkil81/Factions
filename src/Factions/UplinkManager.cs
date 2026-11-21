@@ -41,50 +41,33 @@ namespace Factions
         /// its physics.</summary>
         public const WireFeatures AgentLocalFeatures = WireFeatures.GridSpeed    // munition speed rides the same bit
                                                      | WireFeatures.BlockPause    // the paused blocks are this server's entities
-                                                     | WireFeatures.TrafficVoice; // the listener's radio is this server's ship
+                                                     | WireFeatures.TrafficVoice  // the listener's radio is this server's ship
+                                                     | WireFeatures.NodeSpawn     // the respawn is handled, and the character placed, here
+                                                     | WireFeatures.CrewOrders    // the seat and its crew are this server's
+                                                     | WireFeatures.CombatOutcome  // the authority's fights, told to this server's viewers
+                                                     | WireFeatures.DesignVersions // the scanned grid is this server's
+                                                     | WireFeatures.DockSupply     // the docked ship is this server's
+                                                     | WireFeatures.ShipAssets     // the terminal, the hull and grid storage are this server's
+                                                     | WireFeatures.Restoration    // the welded ship and the terminal are this server's
+                                                     | WireFeatures.WingCommand;   // the antenna, the target and the locks are this server's
 
         /// <summary>Features the authority cannot serve to a remote client: the local ones above,
         /// plus rocks, whose server-side voxels are materialised only in the authority's own
         /// sectors — a client told to derive them in a sector nobody materialises would render
         /// rock that is not there.
         ///
-        /// <para>Node inventory joins them because it moves physical goods. The player, their
-        /// character position and the grid the goods land in all live in the process the client is
-        /// connected to; from the authority a remote caller has no identity to resolve and no entity
-        /// to reach, so every request would be refused. Withholding the bit says so once at link
-        /// time rather than once per click.</para>
+        /// <para>Diplomacy is not among them either: its readout and the leader check take the
+        /// caller's identity from <see cref="LinkedViewers"/>, which knows a relayed caller.</para>
         ///
-        /// <para>Ship assets are withheld for the same reason: the terminal block, the hull beside
-        /// it and the transient spawn are all entities in the caller's own sector, none of which
-        /// exist on this server when the caller is relayed from another.</para>
+        /// <para>Node inventory is not among them: the authority decides a relayed player's transfer
+        /// from their agent's position report and its own node stock, and the agent moves the goods
+        /// through the block (<see cref="PlayerNodeTransferManager"/>).</para>
         ///
-        /// <para>Station refit joins them one step further along: it scans a live station grid and
-        /// then closes and rebuilds one. The terminal the scan names and the grid the rebuild
-        /// replaces are both entities in the caller's sector, and a remote caller has neither an
-        /// identity to resolve nor a block to stand at.</para>
-        ///
-        /// <para>Dock supply for the same reason: refuel and rearm write into a ship docked at a
-        /// terminal in the caller's own sector. Restoration too: it welds and places blocks on a ship
-        /// beside such a terminal.</para>
-        ///
-        /// <para>Diplomacy because its acts are leader-only, and the leader check resolves the
-        /// caller's SE identity from this server's online players, which a relayed caller is not
-        /// among. Every act would be refused as unidentified.</para>
-        ///
-        /// <para>Wing commands because the antenna pressed and the hulls it commands are entities
-        /// in the caller's own sector.</para>
-        ///
-        /// <para>Combat outcome notices because a fight's viewers are the players within observation
-        /// range of it, which a relayed caller, in another server's sectors, never is.</para>
-        ///
-        /// <para>Node spawn because the respawn request it rides is handled, and the character
-        /// placed, by the server the caller is connected to.</para></summary>
+        /// <para>Combat outcome notices, node spawn, crew orders, design queries, dock supply, ship assets, restoration and wing commands are served by the caller's own
+        /// server instead (<see cref="AgentLocalFeatures"/>): a fight's viewers are the players near
+        /// it, the respawn is handled where the caller is connected, and the seat is there.</para></summary>
         public const WireFeatures RemoteWithheldFeatures =
-            AgentLocalFeatures | WireFeatures.FeatureRock | WireFeatures.NodeInventory
-            | WireFeatures.ShipAssets | WireFeatures.StationRefit | WireFeatures.DockSupply
-            | WireFeatures.Diplomacy | WireFeatures.WingCommand | WireFeatures.CrewOrders | WireFeatures.CombatOutcome
-            | WireFeatures.Restoration | WireFeatures.DesignVersions
-            | WireFeatures.NodeSpawn | WireFeatures.StatusPanel;
+            AgentLocalFeatures | WireFeatures.FeatureRock;
 
         /// <summary>Client request kinds an agent may replay to the authority after it restarts.
         /// Every one is a subscription — sending it twice yields a fresh snapshot and nothing else.
@@ -197,6 +180,34 @@ namespace Factions
         /// <summary>Agent only: receives each <see cref="RelayKind.StationReply"/> payload from the
         /// authority.</summary>
         public Action<byte[]> StationReplyReceived;
+
+        /// <summary>Authority only: a <see cref="RelayKind.ChatCommand"/> with the sender's Nexus id
+        /// and the caller's steam id. Any player on the agent may send one, linked or not.</summary>
+        public Action<byte, ulong, byte[]> ChatCommandReceived;
+
+        /// <summary>Agent only: a <see cref="RelayKind.ChatReply"/> with the caller's steam id.</summary>
+        public Action<ulong, byte[]> ChatReplyReceived;
+
+        /// <summary>Authority only: a <see cref="RelayKind.CaptureUpload"/> with the sender's Nexus id
+        /// and the caller's steam id.</summary>
+        public Action<byte, ulong, byte[]> CaptureUploadReceived;
+
+        /// <summary>Agent only: a <see cref="RelayKind.CaptureResult"/> with the caller's steam id.</summary>
+        public Action<ulong, byte[]> CaptureResultReceived;
+
+        /// <summary>Authority only: a <see cref="RelayKind.WingCall"/> with the sender's Nexus id and
+        /// the caller's steam id (0 for a block's press).</summary>
+        public Action<byte, ulong, byte[]> WingCallReceived;
+
+        /// <summary>Agent only: a <see cref="RelayKind.WingResult"/> with the caller's steam id.</summary>
+        public Action<ulong, byte[]> WingResultReceived;
+
+        /// <summary>Authority only: a <see cref="RelayKind.HullAsk"/> with the sender's Nexus id and
+        /// the caller's steam id.</summary>
+        public Action<byte, ulong, byte[]> HullAskReceived;
+
+        /// <summary>Agent only: a <see cref="RelayKind.HullAnswer"/> with the caller's steam id.</summary>
+        public Action<ulong, byte[]> HullAnswerReceived;
 
         /// <summary>True once the player's client plugin has been granted a link.</summary>
         public bool IsLinked(ulong steamId)
@@ -364,6 +375,26 @@ namespace Factions
                         Action<byte, byte[]> sink = AgentReportReceived;
                         if (sink != null) sink(home, payload);
                     }
+                    else if (kind == RelayKind.ChatCommand)
+                    {
+                        Action<byte, ulong, byte[]> sink = ChatCommandReceived;
+                        if (sink != null) sink(home, steamId, payload);
+                    }
+                    else if (kind == RelayKind.CaptureUpload)
+                    {
+                        Action<byte, ulong, byte[]> sink = CaptureUploadReceived;
+                        if (sink != null) sink(home, steamId, payload);
+                    }
+                    else if (kind == RelayKind.WingCall)
+                    {
+                        Action<byte, ulong, byte[]> sink = WingCallReceived;
+                        if (sink != null) sink(home, steamId, payload);
+                    }
+                    else if (kind == RelayKind.HullAsk)
+                    {
+                        Action<byte, ulong, byte[]> sink = HullAskReceived;
+                        if (sink != null) sink(home, steamId, payload);
+                    }
                     else if (kind == RelayKind.Unlink)
                     {
                         LinkedClient client;
@@ -387,6 +418,30 @@ namespace Factions
                     {
                         Action<byte[]> sink = StationReplyReceived;
                         if (sink != null) sink(payload);
+                        return;
+                    }
+                    if (kind == RelayKind.ChatReply)
+                    {
+                        Action<ulong, byte[]> sink = ChatReplyReceived;
+                        if (sink != null) sink(steamId, payload);
+                        return;
+                    }
+                    if (kind == RelayKind.CaptureResult)
+                    {
+                        Action<ulong, byte[]> sink = CaptureResultReceived;
+                        if (sink != null) sink(steamId, payload);
+                        return;
+                    }
+                    if (kind == RelayKind.WingResult)
+                    {
+                        Action<ulong, byte[]> sink = WingResultReceived;
+                        if (sink != null) sink(steamId, payload);
+                        return;
+                    }
+                    if (kind == RelayKind.HullAnswer)
+                    {
+                        Action<ulong, byte[]> sink = HullAnswerReceived;
+                        if (sink != null) sink(steamId, payload);
                         return;
                     }
                     if (kind != RelayKind.ServerMessage) return;
@@ -646,6 +701,19 @@ namespace Factions
                 FactionsPlugin.Log.Warn(ex, "Uplink send to " + steamId + " failed.");
                 return false;
             }
+        }
+
+        /// <summary>Agent: hands one client message to the authority, as an unhandled kind is. For a
+        /// local handler that answers some requests of a kind itself and passes the rest on.</summary>
+        public bool ForwardClientMessage(ulong steamId, byte[] data, string what)
+        {
+            return Forward(RelayKind.ClientMessage, steamId, data, what);
+        }
+
+        /// <summary>Agent: hands the authority one frame of <paramref name="kind"/> for a player.</summary>
+        public bool ForwardFrame(RelayKind kind, ulong steamId, byte[] payload, string what)
+        {
+            return Forward(kind, steamId, payload, what);
         }
 
         /// <summary>Agent: wraps and hands one frame to the authority.</summary>

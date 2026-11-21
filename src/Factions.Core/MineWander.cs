@@ -29,8 +29,12 @@ namespace Factions.Core
     ///
     /// <para>Abstract time: the outbound leg takes its own distance at
     /// <see cref="FactionTuning.FleetSpeedKmPerMin"/>, and every ring leg takes
-    /// <see cref="NominalLegKm"/> at that speed whatever its real length, so the current leg is found
-    /// in O(1) however long the dwell.</para>
+    /// <see cref="NominalLegKm"/> at <see cref="FactionTuning.ThrusterCruiseSpeedMs"/> whatever its real
+    /// length, so the current leg is found in O(1) however long the dwell. The ring is timed at the
+    /// speed a materialised miner flies it, not at the abstract transit speed: spawning is judged on
+    /// this position and despawning on the grid's, and a ring lapped every 20 s (20 km legs at
+    /// 500 km/min) swept back into a player's range within seconds of the grid leaving it, so the
+    /// miner was spawned again about once a minute (FAC-509).</para>
     /// </summary>
     public static class MineWander
     {
@@ -57,8 +61,18 @@ namespace Factions.Core
         public const double GravityLiftKm = 2.0;
         public const double GravityLiftJitterKm = 2.0;
 
-        /// <summary>The distance every ring leg is timed as in abstract flight.</summary>
+        /// <summary>The distance every ring leg is timed as in abstract flight, about the mean
+        /// length of one.</summary>
         public const double NominalLegKm = 20.0;
+
+        /// <summary>How fast the abstract miner flies its ring, km/s: the materialised grid's cruise
+        /// speed, or the abstract transit speed when no cruise speed is set.</summary>
+        public static double RingKmPerSec(FactionTuning tuning)
+        {
+            if (tuning == null) return 0;
+            if (tuning.ThrusterCruiseSpeedMs > 0) return tuning.ThrusterCruiseSpeedMs / 1000.0;
+            return tuning.FleetSpeedKmPerMin > 0 ? tuning.FleetSpeedKmPerMin / 60.0 : 0;
+        }
 
         /// <summary>A materialised miner this close to its waypoint turns for the next one, so it
         /// flies the ring instead of stopping at every corner.</summary>
@@ -154,7 +168,9 @@ namespace Factions.Core
                 fraction = outbound > 0 ? elapsed / outbound : 1;
                 return 0;
             }
-            double legSec = NominalLegKm / kmPerSec;
+            double ringKmPerSec = RingKmPerSec(tuning);
+            if (ringKmPerSec <= 0) ringKmPerSec = kmPerSec;
+            double legSec = NominalLegKm / ringKmPerSec;
             double legs = (elapsed - outbound) / legSec;
             if (legs >= int.MaxValue - 1) legs = int.MaxValue - 2;
             int whole = (int)Math.Floor(legs);

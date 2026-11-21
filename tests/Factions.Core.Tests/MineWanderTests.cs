@@ -140,7 +140,8 @@ namespace Factions.Core.Tests
         public void LegAt_Advances_AndNamesTheWaypointBeingFlownTo()
         {
             var tuning = TestSupport.Tuning();
-            tuning.FleetSpeedKmPerMin = 60;   // 1 km/s: a ring leg is NominalLegKm seconds
+            tuning.FleetSpeedKmPerMin = 60;      // 1 km/s: the outbound leg takes its length in seconds
+            tuning.ThrusterCruiseSpeedMs = 1000; // 1 km/s: a ring leg is NominalLegKm seconds
             PendingFleetAction fleet = Dwell("ABC123", new Vec3(0, 0, 0));
             MineWander.Ring ring = MineWander.RingOf(fleet);
             double outbound = fleet.OriginPosKm.DistanceTo(MineWander.Waypoint(ring, 0));
@@ -154,6 +155,39 @@ namespace Factions.Core.Tests
             Vec3 mid = MineWander.PositionAt(fleet, T0.AddSeconds(outbound + 1.5 * MineWander.NominalLegKm), tuning);
             Vec3 w1 = MineWander.Waypoint(ring, 1), w2 = MineWander.Waypoint(ring, 2);
             Assert.Equal(w1.DistanceTo(w2), mid.DistanceTo(w1) + mid.DistanceTo(w2), 6);
+        }
+
+        /// <summary>The ring is flown at the materialised grid's cruise speed, not the abstract transit
+        /// speed. At production's 500 km/min a 20 km leg took 2.4 s, the abstract miner lapped its ring
+        /// every 20 s, and it swept back into a player's range within seconds of its grid leaving it, so
+        /// each miner near a player was spawned again about once a minute.</summary>
+        [Fact]
+        public void TheRing_IsFlownAtCruiseSpeed_NotAtTransitSpeed()
+        {
+            var tuning = TestSupport.Tuning();
+            tuning.FleetSpeedKmPerMin = 500;
+            tuning.ThrusterCruiseSpeedMs = 100;
+            PendingFleetAction fleet = Dwell("ABC123", new Vec3(0, 0, 0), dwellSec: 3600);
+            MineWander.Ring ring = MineWander.RingOf(fleet);
+            double outboundSec = fleet.OriginPosKm.DistanceTo(MineWander.Waypoint(ring, 0)) / (500 / 60.0);
+            DateTime onRing = T0.AddSeconds(outboundSec + 1);
+
+            double t;
+            Assert.Equal(1, MineWander.LegAt(fleet, ring, onRing, tuning, out t));
+            Assert.Equal(1, MineWander.LegAt(fleet, ring, onRing.AddSeconds(199 - 1), tuning, out t));
+            Assert.Equal(2, MineWander.LegAt(fleet, ring, onRing.AddSeconds(200), tuning, out t));
+
+            // Second by second over ten minutes, no faster than a real ring leg flown in 200 s: the
+            // longest is under 30 km, so 0.15 km/s. Before the fix it was over 8 km/s.
+            Vec3 prev = MineWander.PositionAt(fleet, onRing, tuning);
+            double fastest = 0;
+            for (int s = 1; s <= 600; s++)
+            {
+                Vec3 p = MineWander.PositionAt(fleet, onRing.AddSeconds(s), tuning);
+                fastest = Math.Max(fastest, p.DistanceTo(prev));
+                prev = p;
+            }
+            Assert.True(fastest <= 0.15, "the abstract miner moved " + fastest.ToString("F2") + " km in one second");
         }
 
         [Fact]

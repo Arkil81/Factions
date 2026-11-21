@@ -80,6 +80,12 @@ namespace Factions.Core
         /// <summary>Station traffic of the last few seconds not yet handed to this agent, for its
         /// players' traffic voice; null when there is none or nobody there to hear it.</summary>
         public List<NexusTrafficCall> Traffic;
+        /// <summary>Fights resolved over the last few seconds not yet handed to this agent, for the
+        /// combat notices of its players near them; null when there are none or nobody there.</summary>
+        public List<NexusCombatCall> Combat;
+        /// <summary>Node stock to carry into or out of a block for a player connected to this agent,
+        /// re-sent until the agent's report acknowledges it.</summary>
+        public List<NexusStockMove> StockMoves;
         public bool IsEmpty
         {
             get
@@ -89,7 +95,9 @@ namespace Factions.Core
                     && (Shelves == null || Shelves.Count == 0)
                     && (Zones == null || Zones.Count == 0) && (Notices == null || Notices.Count == 0)
                     && (Orders == null || Orders.Count == 0) && (Held == null || Held.Count == 0)
-                    && (Traffic == null || Traffic.Count == 0);
+                    && (Traffic == null || Traffic.Count == 0)
+                    && (Combat == null || Combat.Count == 0)
+                    && (StockMoves == null || StockMoves.Count == 0);
             }
         }
 

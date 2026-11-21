@@ -15,7 +15,7 @@ Most commands print help when given `help`, for example `!factions station queue
 |---|---|---|
 | `!factions expand` | any member | Checks whether a new node can be created where you are, and what it costs. |
 | `!factions expand confirm` | leader | Creates the node, paid from the faction's account. |
-| `yes` / `no` | the player offered it | Answers a claim offer or a conquer offer in chat. |
+| `yes` / `no`, or `yes <site>` / `no <site>` | a leader of the faction offered it | Answers a claim offer or a conquer offer in chat. With more than one offer open, name the site, for example `yes N123`. |
 
 ## Your stations
 

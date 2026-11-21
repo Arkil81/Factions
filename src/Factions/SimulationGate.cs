@@ -27,5 +27,12 @@ namespace Factions
         /// keep vanilla off a Factions station act while this is set, even though <see cref="Deferred"/> is.
         /// </summary>
         internal static volatile bool Hands;
+
+        /// <summary>
+        /// True on a deferred server from the moment its agent materialisers start until session
+        /// unload; false if they failed to start. Between this and <see cref="Hands"/> the station
+        /// cell generator spawns nothing (<see cref="Factions.Core.StationSeedGate"/>).
+        /// </summary>
+        internal static volatile bool HandsPending;
     }
 }

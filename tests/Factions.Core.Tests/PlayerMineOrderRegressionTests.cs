@@ -14,7 +14,9 @@ namespace Factions.Core.Tests
     /// overlapping catchments, a worked deposit, a cooling one, doctrine and non-doctrine hulls,
     /// weighted and unweighted orders, dwells resolving between passes -- captured from the code
     /// before the split (integrate/npc-extraction @ 7489a379) and asserted line for line, under
-    /// both the synchronous tick and the staged cycle.</summary>
+    /// both the synchronous tick and the staged cycle. Three delivery ETAs were re-recorded when ring
+    /// legs moved to cruise speed (FAC-509): a delivery leg departs from the ring point its dwell
+    /// ended on, which moved; nothing else in the transcript did.</summary>
     public sealed class PlayerMineOrderRegressionTests
     {
         private sealed class Catalogue : IPrefabCatalogue
@@ -234,9 +236,9 @@ namespace Factions.Core.Tests
             "P MINE_DISPATCHED D2 -> HubA via_pickup=D1 target=20000L dwell=442s eta_pickup=12:06:05 prefab=Slow drillRate=12.6",
             "P MINE_AUTO_SCAN order=SO-001 hub=HubA rank=2 catchment=4 inflight=3 open=1 dispatched=1 [D1:cooldown_until=12:06:07 D3:cooldown_until=12:06:07 D2:dispatched remaining=no_open_slots]",
             "P MINE_AUTO_SCAN order=SO-002 hub=HubB rank=1 catchment=4 inflight=0 open=4 dispatched=0 [D1:cooldown_until=12:06:07 D2:claimed_by_SO-001 D4:cooldown_until=12:07:19 D3:invalid_weights]",
-            "fleet Doc D4->HubA Service target=0L w=- eta=12:06:24.724 cargo=Ore:Ironx15000,Ore:Stonex15000 resolved=False []",
-            "fleet Fast D1->HubA Service target=0L w=- eta=12:06:09.656 cargo=Ore:Ironx25000,Ore:Stonex25000 resolved=False []",
-            "fleet Fast D3->HubA Service target=0L w=- eta=12:06:41.356 cargo=Ore:Icex67567,Ore:Stonex25000 resolved=False []",
+            "fleet Doc D4->HubA Service target=0L w=- eta=12:06:22.923 cargo=Ore:Ironx15000,Ore:Stonex15000 resolved=False []",
+            "fleet Fast D1->HubA Service target=0L w=- eta=12:06:09.088 cargo=Ore:Ironx25000,Ore:Stonex25000 resolved=False []",
+            "fleet Fast D3->HubA Service target=0L w=- eta=12:06:41.422 cargo=Ore:Icex67567,Ore:Stonex25000 resolved=False []",
             "fleet Slow D1->D2 Navigation target=0L w=- eta=12:06:05.461 cargo=- resolved=False [Mine@D2/20000L/442.098s/Ore:Iron=0.25+Ore:Nickel=0.25+Ore:Stone=0.5 Service@HubA]",
             "node D1 ships=[Slowx1] inv=[] cool=12:06:07",
             "node D2 ships=[] inv=[] cool=12:04:00",

@@ -51,7 +51,7 @@ namespace Factions
         /// (<c>MyGridsStorageEntityComponent.GetGridsInDesignatedArea</c>, a 200 m sphere around the
         /// block). Send and Scan use it so the buttons can never reach a hull the tab did not
         /// list.</summary>
-        private const double DesignatedAreaM = 200.0;
+        internal const double DesignatedAreaM = 200.0;
 
         /// <summary>How far a spawn probe walks out from the terminal looking for empty space, and
         /// the radius that has to be empty. The clone exists for one call and is closed in the same
@@ -72,6 +72,34 @@ namespace Factions
         private readonly FactionRuntime _runtime;
         private readonly UplinkManager _uplink;
         private readonly Action<string> _recordActivity;
+        private readonly Func<TerminalWorld> _world;
+        private readonly Func<SePrefabCatalogue> _catalogue;
+        private readonly Func<CustomPrefabStore> _captured;
+
+        /// <summary>Nexus agent: a hull withdrawn from a node (<c>true</c>) or sent into one, with the
+        /// cargo it carried, for the authority to book: node id, design, withdrawn, cargo, and the
+        /// authority's hold the withdrawal was staged under (a release when not withdrawn). The node
+        /// here is the authority's snapshot, so a change made to it is this server's until the next
+        /// snapshot replaces it. Null elsewhere.</summary>
+        internal Action<string, string, bool, Dictionary<string, long>, long> RemoteHull;
+
+        /// <summary>Nexus agent: asks the authority to hold one hull for a withdrawal before it is
+        /// staged here; the answer comes to <see cref="OnHoldAnswer"/>. False when the ask could not
+        /// be sent. Null elsewhere, where the node's stock is this server's own.</summary>
+        internal Func<NexusHullAsk, bool> AskHold;
+
+        internal const string HoldNotAnswered = "The server holding the ship did not answer. Try again shortly.";
+        internal const string HoldNotSent = "The server holding the ship could not be reached; nothing was taken.";
+
+        private sealed class AskedWithdrawal
+        {
+            public ulong SteamId;
+            public long TerminalEntityId;
+            public string NodeId;
+            public string PrefabId;
+        }
+
+        private readonly NexusCapturePending<AskedWithdrawal> _asked = new NexusCapturePending<AskedWithdrawal>();
 
         /// <summary>Block/PCU per prefab, resolved from its object builders on first use. A prefab's
         /// blocks do not change within a session, and the snapshot is sent per terminal open.</summary>
@@ -86,15 +114,39 @@ namespace Factions
         }
 
         public PlayerShipAssetsManager(FactionRuntime runtime, UplinkManager uplink, Action<string> recordActivity)
+            : this(runtime, () => TerminalWorld.Of(runtime),
+                   () => runtime != null ? runtime.Catalogue : null,
+                   () => runtime != null ? runtime.CapturedPrefabs : null,
+                   uplink, recordActivity)
+        {
+        }
+
+        /// <param name="runtime">Null on a Nexus agent, which then registers no scan here: a scan
+        /// there is a capture, and <see cref="AgentCaptures"/> carries it.</param>
+        public PlayerShipAssetsManager(FactionRuntime runtime, Func<TerminalWorld> world,
+                                       Func<SePrefabCatalogue> catalogue, Func<CustomPrefabStore> captured,
+                                       UplinkManager uplink, Action<string> recordActivity)
         {
             _runtime = runtime;
+            _world = world;
+            _catalogue = catalogue;
+            _captured = captured;
             _uplink = uplink;
             _recordActivity = recordActivity;
             if (_uplink == null) return;
             _uplink.RegisterHandler(WireMessageKind.TerminalAssetsRequest, OnAssetsRequest);
             _uplink.RegisterHandler(WireMessageKind.ShipWithdrawRequest, OnWithdrawRequest);
             _uplink.RegisterHandler(WireMessageKind.ShipSendRequest, OnSendRequest);
-            _uplink.RegisterHandler(WireMessageKind.ShipScanRequest, OnScanRequest);
+            if (_runtime != null) _uplink.RegisterHandler(WireMessageKind.ShipScanRequest, OnScanRequest);
+        }
+
+        private SpatialGraph Graph
+        {
+            get
+            {
+                TerminalWorld w = _world();
+                return w != null ? w.Graph : null;
+            }
         }
 
         public void Close()
@@ -120,7 +172,7 @@ namespace Factions
         /// disagree about who may act at a station.</summary>
         private bool TryAuthorise(ulong steamId, long terminalEntityId, out TerminalContext ctx, out string refusal)
         {
-            return TerminalAccess.TryAuthorise(_runtime, steamId, terminalEntityId, out ctx, out refusal);
+            return TerminalAccess.TryAuthorise(_world(), steamId, terminalEntityId, out ctx, out refusal);
         }
 
         /// <summary>Whether this client was granted the ship surfaces at link time. Checked on every
@@ -185,7 +237,9 @@ namespace Factions
         {
             Vector3D terminal = ctx.Block.PositionComp.GetPosition();
             var rows = new List<WireShipAssetRow>();
-            foreach (SpatialNode node in _runtime.World.Graph.OwnedBy(ctx.Faction.Tag))
+            SpatialGraph graph = Graph;
+            if (graph == null) return null;
+            foreach (SpatialNode node in graph.OwnedBy(ctx.Faction.Tag))
             {
                 if (node == null || node.ShipStock.Count == 0) continue;
                 List<ShipAssetOffer> offers = ShipAssetRules.WithdrawableAt(node.ShipStock, node.ListedForSale);
@@ -227,7 +281,7 @@ namespace Factions
             if (_stats.TryGetValue(prefabId, out cached)) return cached;
 
             var stats = new PrefabStats { GridSize = "" };
-            SePrefabCatalogue catalogue = _runtime.Catalogue;
+            SePrefabCatalogue catalogue = _catalogue();
             if (catalogue != null) stats.GridSize = catalogue.GridSize(prefabId);
 
             MyObjectBuilder_CubeGrid[] grids;
@@ -261,7 +315,7 @@ namespace Factions
             grids = null;
             if (string.IsNullOrEmpty(prefabId)) return false;
 
-            CustomPrefabStore captured = _runtime.CapturedPrefabs;
+            CustomPrefabStore captured = _captured();
             if (captured != null && captured.TryGetGrids(prefabId, out grids) && grids != null && grids.Length > 0)
                 return true;
 
@@ -292,7 +346,7 @@ namespace Factions
             {
                 // True means the clone is in the world: Tick owns the reply from here, and this
                 // request is answered only once the blueprint has been copied off it.
-                if (TryWithdraw(steamId, terminalEntityId, nodeId, prefabId, out message)) return;
+                if (TryWithdraw(steamId, terminalEntityId, nodeId, prefabId, null, out message)) return;
             }
             catch (Exception ex)
             {
@@ -324,8 +378,12 @@ namespace Factions
         /// </summary>
         /// <returns>True when the clone is staged and <see cref="Tick"/> now owns the reply; false
         /// with <paramref name="message"/> set when the withdrawal was refused outright.</returns>
+        /// <param name="held">The authority's hold, on a Nexus agent once it has answered; null before
+        /// that, when the checks below run, the ask goes out, and the staging waits for the answer.
+        /// Under a hold the authority's stock is the one that counts, and this server's copy of it
+        /// is left to the next snapshot.</param>
         private bool TryWithdraw(ulong steamId, long terminalEntityId, string nodeId, string prefabId,
-                                 out string message)
+                                 NexusHullAnswer held, out string message)
         {
             TerminalContext ctx;
             if (!TryAuthorise(steamId, terminalEntityId, out ctx, out message)) return false;
@@ -333,8 +391,9 @@ namespace Factions
             if (string.IsNullOrEmpty(prefabId)) { message = "Pick a ship to withdraw."; return false; }
 
             SpatialNode holder;
-            if (string.IsNullOrEmpty(nodeId)
-                || !_runtime.World.Graph.Nodes.TryGetValue(nodeId, out holder) || holder == null)
+            SpatialGraph graph = Graph;
+            if (string.IsNullOrEmpty(nodeId) || graph == null
+                || !graph.Nodes.TryGetValue(nodeId, out holder) || holder == null)
             {
                 message = "That station no longer exists.";
                 return false;
@@ -348,7 +407,7 @@ namespace Factions
             int stock, listed = 0;
             holder.ShipStock.TryGetValue(prefabId, out stock);
             holder.ListedForSale.TryGetValue(prefabId, out listed);
-            if (ShipAssetRules.WithdrawableCount(stock, listed) <= 0)
+            if (held == null && ShipAssetRules.WithdrawableCount(stock, listed) <= 0)
             {
                 message = "No " + prefabId + " is free to withdraw at " + NodeLabel(holder) + ".";
                 return false;
@@ -365,6 +424,17 @@ namespace Factions
             if (!TryResolvePrefabGrids(prefabId, out template))
             {
                 message = "'" + prefabId + "' is no longer a prefab this server can build.";
+                return false;
+            }
+
+            if (held == null && AskHold != null)
+            {
+                var ask = new NexusHullAsk { Node = holder.Id, Prefab = prefabId, Tag = ctx.Faction.Tag, Identity = ctx.IdentityId };
+                var asked = new AskedWithdrawal { SteamId = steamId, TerminalEntityId = terminalEntityId, NodeId = holder.Id, PrefabId = prefabId };
+                ask.Id = _asked.Add(asked, DateTime.UtcNow);
+                if (AskHold(ask)) return true;
+                _asked.Take(ask.Id);
+                message = HoldNotSent;
                 return false;
             }
 
@@ -391,9 +461,12 @@ namespace Factions
             foreach (MyCubeGrid grid in spawned)
                 if (grid != null) grid.Save = false;
 
-            int remaining = stock - 1;
-            if (remaining > 0) holder.ShipStock[prefabId] = remaining;
-            else holder.ShipStock.Remove(prefabId);
+            int remaining = held != null ? held.Remaining : stock - 1;
+            if (held == null)
+            {
+                if (remaining > 0) holder.ShipStock[prefabId] = remaining;
+                else holder.ShipStock.Remove(prefabId);
+            }
 
             _pending.Add(new PendingWithdrawal
             {
@@ -407,6 +480,7 @@ namespace Factions
                 TemplateGrids = template.Length,
                 Spawned = spawned,
                 Remaining = remaining,
+                Hold = held != null ? held.Hold : 0,
             });
 
             return true;
@@ -428,6 +502,8 @@ namespace Factions
             public int TemplateGrids;
             public List<MyCubeGrid> Spawned;
             public int Remaining;
+            /// <summary>The authority's hold, on a Nexus agent; zero elsewhere.</summary>
+            public long Hold;
             public int FramesWaited;
             public int LastGroupSize;
             public int StableFrames;
@@ -451,6 +527,17 @@ namespace Factions
         /// Returns immediately when nothing is staged, which is almost always.</summary>
         public void Tick()
         {
+            if (_asked.Count > 0)
+            {
+                List<AskedWithdrawal> lapsed = _asked.Lapse(DateTime.UtcNow);
+                if (lapsed != null)
+                    for (int i = 0; i < lapsed.Count; i++)
+                    {
+                        Log.Info("SHIP_WITHDRAW_REFUSED node=" + lapsed[i].NodeId + " player=" + lapsed[i].SteamId
+                               + " prefab=" + lapsed[i].PrefabId + " reason=" + HoldNotAnswered);
+                        _uplink.Send(lapsed[i].SteamId, FactionsWire.WriteShipWithdrawResult(false, Guid.Empty, HoldNotAnswered));
+                    }
+            }
             if (_pending.Count == 0) return;
             for (int i = _pending.Count - 1; i >= 0; i--)
             {
@@ -559,6 +646,7 @@ namespace Factions
             };
 
             if (_recordActivity != null) _recordActivity(pending.NodeId);
+            if (RemoteHull != null) RemoteHull(pending.NodeId, pending.PrefabId, true, null, pending.Hold);
 
             Log.Info("SHIP_WITHDRAWN node=" + pending.NodeId + " faction=" + (pending.FactionTag ?? "")
                    + " player=" + pending.IdentityId + " prefab=" + pending.PrefabId
@@ -598,11 +686,48 @@ namespace Factions
         /// — so is everything else it held.</summary>
         private void ReturnHull(PendingWithdrawal pending)
         {
+            if (pending.Hold != 0)
+            {
+                if (RemoteHull != null) RemoteHull(pending.NodeId, pending.PrefabId, false, null, pending.Hold);
+                return;
+            }
             SpatialNode holder;
-            if (!_runtime.World.Graph.Nodes.TryGetValue(pending.NodeId, out holder) || holder == null) return;
+            SpatialGraph graph = Graph;
+            if (graph == null || !graph.Nodes.TryGetValue(pending.NodeId, out holder) || holder == null) return;
             int stock;
             holder.ShipStock.TryGetValue(pending.PrefabId, out stock);
             holder.ShipStock[pending.PrefabId] = stock + 1;
+        }
+
+        /// <summary>Nexus agent: the authority's answer to a hold. Granted, the withdrawal is staged
+        /// as it would be anywhere, under the hold; anything that then fails releases it. A grant
+        /// for an ask that already lapsed here is released at once.</summary>
+        public void OnHoldAnswer(NexusHullAnswer answer)
+        {
+            if (answer == null) return;
+            AskedWithdrawal asked = _asked.Take(answer.Id);
+            if (asked == null)
+            {
+                if (answer.Ok && RemoteHull != null) RemoteHull(answer.Node, answer.Prefab, false, null, answer.Hold);
+                return;
+            }
+            string message = answer.Message ?? "The withdrawal was refused.";
+            if (answer.Ok)
+            {
+                try
+                {
+                    if (TryWithdraw(asked.SteamId, asked.TerminalEntityId, asked.NodeId, asked.PrefabId, answer, out message)) return;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn(ex, "Ship withdrawal failed for " + asked.SteamId + ".");
+                    message = "The withdrawal failed on the server; nothing was taken from the node.";
+                }
+                if (RemoteHull != null) RemoteHull(asked.NodeId, asked.PrefabId, false, null, answer.Hold);
+            }
+            Log.Info("SHIP_WITHDRAW_REFUSED node=" + (asked.NodeId ?? "") + " player=" + asked.SteamId
+                   + " prefab=" + (asked.PrefabId ?? "") + " reason=" + message);
+            _uplink.Send(asked.SteamId, FactionsWire.WriteShipWithdrawResult(false, Guid.Empty, message));
         }
 
         private void Refuse(PendingWithdrawal pending, string message)
@@ -761,7 +886,7 @@ namespace Factions
                 return false;
             }
 
-            SePrefabCatalogue catalogue = _runtime.Catalogue;
+            SePrefabCatalogue catalogue = _catalogue();
             if (catalogue == null) { message = "No prefab catalogue is loaded on this server."; return false; }
 
             string fingerprint = PrefabCatalogueScanner.ComputeLiveFingerprint(group);
@@ -819,6 +944,7 @@ namespace Factions
             ctx.Node.ShipStock.TryGetValue(prefabId, out held2);
             ctx.Node.ShipStock[prefabId] = held2 + 1;
             if (_recordActivity != null) _recordActivity(ctx.Node.Id);
+            if (RemoteHull != null) RemoteHull(ctx.Node.Id, prefabId, false, accepted, 0);
 
             Log.Info("SHIP_SENT node=" + ctx.Node.Id + " faction=" + ctx.Node.OwnerFactionTag
                    + " player=" + ctx.IdentityId + " prefab=" + prefabId
@@ -838,7 +964,7 @@ namespace Factions
         /// against each grid's own box rather than its centre, which is how vanilla's sphere query
         /// finds them in the first place — a long hull nosed up to the terminal is in the tab's list
         /// and must not be refused by the button beside it.</summary>
-        private static bool WithinDesignatedArea(MyCubeBlock terminal, List<MyCubeGrid> group)
+        internal static bool WithinDesignatedArea(MyCubeBlock terminal, List<MyCubeGrid> group)
         {
             var sphere = new BoundingSphereD(terminal.PositionComp.GetPosition(), DesignatedAreaM);
             foreach (MyCubeGrid g in group)

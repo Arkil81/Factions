@@ -35,6 +35,57 @@ namespace Factions.Wire
         /// <summary>The authority's answer to the stations in an agent's report: grants the agent has
         /// not loaded, and close acknowledgements. Steam id 0; gzipped Core <c>NexusStationReply</c>.</summary>
         StationReply = 7,
+
+        /// <summary>A Factions chat command a player typed on an agent, for the authority to run.
+        /// Steam id is the caller's; the payload is <see cref="NexusRelayWire.WriteChatCommand"/>.</summary>
+        ChatCommand = 8,
+
+        /// <summary>What the authority's run of a <see cref="ChatCommand"/> answered, for the agent
+        /// to tell the caller. Steam id is the caller's; the payload is
+        /// <see cref="NexusRelayWire.WriteChatReply"/>.</summary>
+        ChatReply = 9,
+
+        /// <summary>A capture made on an agent, for the authority to register. Steam id is the
+        /// caller's; the payload is a gzipped Core <c>NexusCaptureUpload</c>, opaque here.</summary>
+        CaptureUpload = 10,
+
+        /// <summary>The authority's answer to a <see cref="CaptureUpload"/>. Steam id is the caller's;
+        /// the payload is a gzipped Core <c>NexusCaptureResult</c>.</summary>
+        CaptureResult = 11,
+
+        /// <summary>A wing command given on an agent, or a refresh of the readings a standing order
+        /// rests on. Steam id is the caller's (0 for a block's press); the payload is a gzipped Core
+        /// <c>NexusWingCall</c>, opaque here.</summary>
+        WingCall = 12,
+
+        /// <summary>The authority's answer to a <see cref="WingCall"/>. Steam id is the caller's; the
+        /// payload is a gzipped Core <c>NexusWingResult</c>.</summary>
+        WingResult = 13,
+
+        /// <summary>An agent asks the authority to hold one hull of a node's stock for a withdrawal
+        /// staged there. Steam id is the caller's; the payload is a gzipped Core <c>NexusHullAsk</c>.</summary>
+        HullAsk = 14,
+
+        /// <summary>The authority's answer to a <see cref="HullAsk"/>. Steam id is the caller's; the
+        /// payload is a gzipped Core <c>NexusHullAnswer</c>.</summary>
+        HullAnswer = 15,
+    }
+
+    /// <summary>A chat command forwarded from an agent: the line as typed and who typed it, as the
+    /// server they are connected to knows them.</summary>
+    public sealed class RelayChatCommand
+    {
+        /// <summary>The agent's number for this command, echoed in the reply.</summary>
+        public long Id;
+        /// <summary>The whole line, prefix included.</summary>
+        public string Text;
+        /// <summary>The caller's identity on the agent; the authority prefers its own.</summary>
+        public long IdentityId;
+        /// <summary>The caller's promote level on the agent (SE's MyPromoteLevel as a byte).</summary>
+        public byte Promote;
+        public bool HasPosition;
+        /// <summary>The caller's character position in world metres.</summary>
+        public double X, Y, Z;
     }
 
     /// <summary>One player in a <see cref="RelayKind.PlayerPositions"/> frame. Position in world
@@ -78,6 +129,10 @@ namespace Factions.Wire
         /// enormous buffer before the read fails.</summary>
         private const int MaxPayloadBytes = 16 * 1024 * 1024;
 
+        /// <summary>The highest <see cref="RelayKind"/> this build reads. Raised with every kind added:
+        /// a frame above it is refused on arrival.</summary>
+        public const RelayKind LastKind = RelayKind.HullAnswer;
+
         public static byte[] Write(RelayKind kind, byte homeServerId, ulong steamId, byte[] payload)
         {
             using (var ms = new MemoryStream())
@@ -106,13 +161,99 @@ namespace Factions.Wire
                 {
                     if (r.ReadInt32() != RelayVersion) return false;
                     kind = (RelayKind)r.ReadByte();
-                    if (kind < RelayKind.ClientMessage || kind > RelayKind.StationReply) return false;
+                    if (kind < RelayKind.ClientMessage || kind > LastKind) return false;
                     homeServerId = r.ReadByte();
                     steamId = r.ReadUInt64();
                     int len = r.ReadInt32();
                     if (len < 0 || len > MaxPayloadBytes) return false;
                     payload = len == 0 ? new byte[0] : r.ReadBytes(len);
                     return payload.Length == len;
+                }
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Upper bound on the characters of a forwarded command line.</summary>
+        public const int MaxChatCommandChars = 4096;
+
+        /// <summary>Upper bound on lines in one chat reply, so a corrupt count cannot pre-allocate.</summary>
+        public const int MaxChatReplyLines = 256;
+
+        /// <summary>The payload of a <see cref="RelayKind.ChatCommand"/> frame.</summary>
+        public static byte[] WriteChatCommand(RelayChatCommand c)
+        {
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                string text = c.Text ?? "";
+                if (text.Length > MaxChatCommandChars) text = text.Substring(0, MaxChatCommandChars);
+                w.Write(c.Id);
+                w.Write(text);
+                w.Write(c.IdentityId);
+                w.Write(c.Promote);
+                w.Write(c.HasPosition);
+                w.Write(c.X); w.Write(c.Y); w.Write(c.Z);
+                return ms.ToArray();
+            }
+        }
+
+        public static bool TryReadChatCommand(byte[] payload, out RelayChatCommand c)
+        {
+            c = null;
+            if (payload == null) return false;
+            try
+            {
+                using (var ms = new MemoryStream(payload))
+                using (var r = new BinaryReader(ms, Encoding.UTF8))
+                {
+                    var x = new RelayChatCommand();
+                    x.Id = r.ReadInt64();
+                    x.Text = r.ReadString();
+                    if (x.Text.Length > MaxChatCommandChars) return false;
+                    x.IdentityId = r.ReadInt64();
+                    x.Promote = r.ReadByte();
+                    x.HasPosition = r.ReadBoolean();
+                    x.X = r.ReadDouble(); x.Y = r.ReadDouble(); x.Z = r.ReadDouble();
+                    if (ms.Position != ms.Length) return false;
+                    c = x;
+                    return true;
+                }
+            }
+            catch { return false; }
+        }
+
+        /// <summary>The payload of a <see cref="RelayKind.ChatReply"/> frame: the command's id and
+        /// each message it answered, in order. Lines past <see cref="MaxChatReplyLines"/> are cut.</summary>
+        public static byte[] WriteChatReply(long id, IList<string> lines)
+        {
+            int n = lines == null ? 0 : Math.Min(lines.Count, MaxChatReplyLines);
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                w.Write(id);
+                w.Write(n);
+                for (int i = 0; i < n; i++) w.Write(lines[i] ?? "");
+                return ms.ToArray();
+            }
+        }
+
+        public static bool TryReadChatReply(byte[] payload, out long id, out List<string> lines)
+        {
+            id = 0; lines = null;
+            if (payload == null) return false;
+            try
+            {
+                using (var ms = new MemoryStream(payload))
+                using (var r = new BinaryReader(ms, Encoding.UTF8))
+                {
+                    id = r.ReadInt64();
+                    int n = r.ReadInt32();
+                    if (n < 0 || n > MaxChatReplyLines) return false;
+                    var list = new List<string>(n);
+                    for (int i = 0; i < n; i++) list.Add(r.ReadString());
+                    if (ms.Position != ms.Length) return false;
+                    lines = list;
+                    return true;
                 }
             }
             catch { return false; }

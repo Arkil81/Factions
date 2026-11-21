@@ -53,7 +53,7 @@ namespace Factions
         }
     }
 
-    public sealed partial class FactionRuntime
+    internal sealed partial class RestorationReferences
     {
         /// <summary>The target of a grid its marks name (explicit prefab, registered design, spawn,
         /// store sale), best-fitting reference grid first. <paramref name="unmarked"/> when nothing

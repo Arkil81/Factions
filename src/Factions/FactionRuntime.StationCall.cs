@@ -14,6 +14,9 @@ namespace Factions
         public long AntennaEntityId;
         /// <summary>The presser (client, bench); zero for a block or the host.</summary>
         public long PresserIdentityId;
+        /// <summary>The presser's SE faction tag as the server they pressed on has it; null to look it
+        /// up here.</summary>
+        public string PresserTag;
         public string BenchLabel;
     }
 
@@ -75,8 +78,45 @@ namespace Factions
         /// <summary>A watched station grid was hit by <paramref name="attackerGridId"/>.</summary>
         internal void RecordStationAttacker(long stationGridId, long attackerGridId)
         {
+            RecordStationAttacker(stationGridId, attackerGridId, DateTime.UtcNow);
+        }
+
+        /// <summary>A station grid was hit at <paramref name="hitUtc"/>: here, or on the Nexus agent
+        /// relaying its call. A hit older than the one on record does not replace it.</summary>
+        internal void RecordStationAttacker(long stationGridId, long attackerGridId, DateTime hitUtc)
+        {
             if (attackerGridId == 0 || attackerGridId == stationGridId) return;
-            _stationHits[stationGridId] = new StationHit { AttackerGridId = attackerGridId, Utc = DateTime.UtcNow };
+            StationHit held;
+            if (_stationHits.TryGetValue(stationGridId, out held) && held.Utc > hitUtc) return;
+            _stationHits[stationGridId] = new StationHit { AttackerGridId = attackerGridId, Utc = hitUtc };
+        }
+
+        /// <summary>Whether a station's call stands on the grid.</summary>
+        internal bool HasStationCall(long stationGridId)
+        {
+            return _stationCalls.Count > 0 && _stationCalls.ContainsKey(stationGridId);
+        }
+
+        /// <summary>Whether the host raises the call of a station owned by <paramref name="tag"/>
+        /// itself: an NPC faction this runtime runs (<see cref="StationCallRules.HostCalls"/>).</summary>
+        internal bool HostCallsFor(string tag)
+        {
+            FactionState st = tag != null ? FindState(tag) : null;
+            return st != null && StationCallRules.HostCalls(true, st.IsPlayerFaction);
+        }
+
+        /// <summary>An agent's NPC stations that cannot call, held as long as its reports keep
+        /// naming them.</summary>
+        private struct AgentMuted { public List<string> Nodes; public DateTime Utc; }
+        private readonly Dictionary<byte, AgentMuted> _agentMuted = new Dictionary<byte, AgentMuted>();
+        private static readonly TimeSpan AgentMutedLife = TimeSpan.FromSeconds(10);
+
+        /// <summary>The NPC stations standing on agent <paramref name="home"/> with no working antenna,
+        /// from its latest report; null or empty when it has none.</summary>
+        internal void SetAgentMutedStations(byte home, List<string> nodeIds, DateTime nowUtc)
+        {
+            if (nodeIds == null || nodeIds.Count == 0) _agentMuted.Remove(home);
+            else _agentMuted[home] = new AgentMuted { Nodes = nodeIds, Utc = nowUtc };
         }
 
         /// <summary>Takes one call: validates the antenna and the station, then starts the call or
@@ -94,7 +134,7 @@ namespace Factions
             if (st == null || _world == null) return RefuseStationCall(req, tag, null, WingRefusal.NoFaction);
             if (req.PresserIdentityId != 0)
             {
-                string presserTag = WingWorld.FactionTagOf(req.PresserIdentityId);
+                string presserTag = req.PresserTag ?? WingWorld.FactionTagOf(req.PresserIdentityId);
                 if (!string.Equals(presserTag, st.Tag, StringComparison.OrdinalIgnoreCase))
                     return RefuseStationCall(req, st.Tag, null, WingRefusal.NotYourAntenna);
             }
@@ -412,6 +452,19 @@ namespace Factions
                 else if (_stationRefusedLogged.Add(gridId))
                     _log.Write("STATION_CALL_REFUSED tag=" + st.Tag + " node=" + nodeId + " antenna=0 via=host"
                                + " reason=" + WingRules.Token(firstRefusal) + " attacker=" + hit.AttackerGridId);
+            }
+            // Stations standing on the agents, which read their own antennas.
+            foreach (AgentMuted muted in _agentMuted.Values)
+            {
+                if (now - muted.Utc > AgentMutedLife) continue;
+                for (int i = 0; i < muted.Nodes.Count; i++)
+                {
+                    SpatialNode node;
+                    FactionState st;
+                    if (muted.Nodes[i] != null && _world.Graph.Nodes.TryGetValue(muted.Nodes[i], out node)
+                        && (st = FindState(node.OwnerFactionTag)) != null
+                        && StationCallRules.Silenced(true, st.IsPlayerFaction, false)) _silencedScratch.Add(muted.Nodes[i]);
+                }
             }
             _world.SetSilencedStations(_silencedScratch);
         }

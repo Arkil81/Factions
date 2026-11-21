@@ -19,11 +19,11 @@ namespace Factions
     /// Factions spawn produced it from (this process's spawner record, else its mark's fleet key);
     /// the prefab a Factions store sold it as; and, when nothing marks it, a pattern match against
     /// the prefab catalogue, the captures and the registered designs
-    /// (FactionRuntime.RestorationMatch.cs). A registered design outranks the grid's origin
+    /// (RestorationReferences.Match.cs). A registered design outranks the grid's origin
     /// because it is the owner's own snapshot of the ship as they want it back, additions
     /// included.</para>
     /// </summary>
-    public sealed partial class FactionRuntime
+    internal sealed partial class RestorationReferences
     {
         /// <summary>Below this share of the live grid matched, the transform is not trusted.</summary>
         private const double RestoreFitWarnShare = 0.5;
@@ -218,12 +218,20 @@ namespace Factions
         /// <summary>Snapshots <paramref name="live"/> — the grid and its subgrids — as its design and
         /// logs <c>DESIGN_REGISTERED</c> with the <paramref name="fee"/> charged for it. False when
         /// the design could not be written to disk; it is then usable until restart.</summary>
-        internal bool CommitRegistration(RestorationLiveGroup live, long identityId, long fee, out string fingerprint)
+        /// <summary>The design <paramref name="live"/> registers as: its grids' builders, root first,
+        /// and their fingerprint.</summary>
+        internal static MyObjectBuilder_CubeGrid[] DesignOf(RestorationLiveGroup live, out string fingerprint)
         {
-            MyCubeGrid grid = live.Grids[0];
             var builders = new MyObjectBuilder_CubeGrid[live.Grids.Count];
             for (int i = 0; i < live.Grids.Count; i++) builders[i] = (MyObjectBuilder_CubeGrid)live.Grids[i].GetObjectBuilder(true);
             fingerprint = RestorationDiff.Fingerprint(live.Assembly.Grids);
+            return builders;
+        }
+
+        internal bool CommitRegistration(RestorationLiveGroup live, long identityId, long fee, out string fingerprint)
+        {
+            MyCubeGrid grid = live.Grids[0];
+            MyObjectBuilder_CubeGrid[] builders = DesignOf(live, out fingerprint);
             bool persisted = _customPrefabStore.RegisterDesign(grid.EntityId, fingerprint, builders, grid.DisplayName,
                                                                identityId, DateTime.UtcNow);
 
@@ -317,7 +325,8 @@ namespace Factions
             }
 
             string via;
-            string prefabId = SpawnedPrefabOf(eid, out via);
+            via = null;
+            string prefabId = _spawnedPrefabOf != null ? _spawnedPrefabOf(eid, out via) : null;
             if (prefabId == null && _customPrefabStore != null)
             {
                 CustomPrefabStore.SoldShipRecord sold;
@@ -335,37 +344,6 @@ namespace Factions
             error = "no reference: not a Factions spawn, not sold by a Factions store, and no registered design."
                   + " Name one with prefab=<id>, or register the ship while it is whole.";
             return false;
-        }
-
-        /// <summary>The prefab a Factions spawn produced <paramref name="eid"/> from: this process's
-        /// spawner record, else the grid's mark, whose fleet key names the fleet and — for a squadron
-        /// hull — its slot (<c>key#i</c>). Null for a grid this plugin did not spawn.</summary>
-        private string SpawnedPrefabOf(long eid, out string via)
-        {
-            via = null;
-            var vanilla = _spawner as VanillaFleetSpawner;
-            string prefab = vanilla != null ? vanilla.GridPrefabId(eid) : null;
-            if (!string.IsNullOrEmpty(prefab)) { via = "spawn"; return prefab; }
-
-            SimGridRecord record;
-            if (!SimGridMarks.TryGet(eid, out record) || record == null || string.IsNullOrEmpty(record.FleetKey)) return null;
-            string recordKey = record.FleetKey;
-            foreach (FactionState st in _states)
-                foreach (PendingFleetAction fleet in st.PendingFleets)
-                {
-                    string key = FleetKey(fleet);
-                    if (!FleetKeyCovers(key, recordKey)) continue;
-                    via = "fleet";
-                    int hash = recordKey.Length > key.Length ? key.Length : -1;
-                    int slot;
-                    if (hash >= 0 && int.TryParse(recordKey.Substring(hash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out slot))
-                    {
-                        IReadOnlyList<string> hulls = SpawnHulls(fleet);
-                        if (hulls != null && slot < hulls.Count && !string.IsNullOrEmpty(hulls[slot])) return hulls[slot];
-                    }
-                    return string.IsNullOrEmpty(fleet.ShipPrefabId) ? null : fleet.ShipPrefabId;
-                }
-            return null;
         }
 
         /// <summary>A prefab's grids by id — a player capture, else an SE prefab definition, matched

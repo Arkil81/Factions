@@ -23,7 +23,7 @@ namespace Factions
     ///   <item>the result is logged and written to the bridge outbox back on the game thread.</item>
     /// </list>
     /// </summary>
-    public sealed partial class FactionRuntime
+    internal sealed partial class RestorationReferences
     {
         /// <summary>Game-thread time a pending match may spend per frame.</summary>
         private const double RestoreMatchSliceMs = 2.0;

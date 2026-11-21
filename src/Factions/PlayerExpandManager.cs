@@ -60,6 +60,7 @@ namespace Factions
             {
                 case WireExpandAction.Subscribe:
                     _streaming[steamId] = 0;
+                    _unresolved.Remove(steamId);
                     if (UplinkManager.DebugTraffic) _uplink.WriteTraffic("EXPAND_SUBSCRIBE steam=" + steamId);
                     SendStatus(steamId);
                     return;
@@ -89,14 +90,20 @@ namespace Factions
 
         private void SendStatus(ulong steamId)
         {
-            MyPlayer player;
+            long identityId;
             Vec3 posKm;
             MyFaction seFaction;
-            if (!TryResolve(steamId, out player, out posKm, out seFaction)) return;
+            string cause;
+            if (!TryResolve(steamId, out identityId, out posKm, out seFaction, out cause))
+            {
+                NoteUnresolved(steamId, identityId, cause);
+                return;
+            }
+            _unresolved.Remove(steamId);
 
             PlayerExpandQuote quote = _runtime.QuoteExpandForPlayer(
                 _runtime.FindFaction(seFaction.Tag), seFaction.Tag,
-                player.Identity.IdentityId, seFaction.FactionId, posKm);
+                identityId, seFaction.FactionId, posKm);
             if (quote == null) return;
 
             int quoteId = ++_quoteSeq;
@@ -116,16 +123,21 @@ namespace Factions
                 return;
             }
 
-            MyPlayer player;
+            long identityId;
             Vec3 posKm;
             MyFaction seFaction;
-            if (!TryResolve(steamId, out player, out posKm, out seFaction)) return;
+            string cause;
+            if (!TryResolve(steamId, out identityId, out posKm, out seFaction, out cause))
+            {
+                NoteUnresolved(steamId, identityId, cause);
+                return;
+            }
 
-            if (!PlayerAuthority.MayCommand(player.Identity.IdentityId, seFaction.Tag))
+            if (!PlayerAuthority.MayCommand(identityId, seFaction.Tag))
             {
                 PlayerExpandQuote refused = _runtime.QuoteExpandForPlayer(
                     _runtime.FindFaction(seFaction.Tag), seFaction.Tag,
-                    player.Identity.IdentityId, seFaction.FactionId, posKm);
+                    identityId, seFaction.FactionId, posKm);
                 if (refused == null) return;
                 _streaming[steamId] = 0;
                 _uplink.Send(steamId, Encode(++_quoteSeq, refused, true, WireExpandVerdict.NotLeader, null));
@@ -134,7 +146,7 @@ namespace Factions
 
             PlayerExpandResult result = _runtime.ExpandForPlayer(
                 _runtime.FindFaction(seFaction.Tag), seFaction.Tag,
-                player.Identity.IdentityId, seFaction.FactionId, posKm);
+                identityId, seFaction.FactionId, posKm);
             if (result == null) return;
 
             // Spend the quote whatever the outcome, so a refusal cannot be retried by re-sending the
@@ -174,15 +186,22 @@ namespace Factions
             }
         }
 
-        /// <summary>The subscriber's live player, position and SE faction. A player with no character
+        /// <summary>The subscriber's identity, position and SE faction. A player with no character
         /// (respawn screen) or no faction has nothing to be told, and is left subscribed rather than
-        /// dropped — both states are transient and the window is still open.</summary>
-        private bool TryResolve(ulong steamId, out MyPlayer player, out Vec3 posKm, out MyFaction seFaction)
+        /// dropped — both states are transient and the window is still open.
+        ///
+        /// <para>A player connected to a Nexus agent is not online here: they resolve to this
+        /// server's identity for their Steam id and stand where their agent last reported them, so
+        /// the readout quotes and the Expand commits from Main or Day as it does here.</para></summary>
+        private bool TryResolve(ulong steamId, out long identityId, out Vec3 posKm, out MyFaction seFaction,
+                                out string cause)
         {
-            player = null;
+            identityId = 0L;
             posKm = new Vec3(0, 0, 0);
             seFaction = null;
+            cause = null;
 
+            MyPlayer player = null;
             foreach (MyPlayer candidate in MySession.Static.Players.GetOnlinePlayers())
             {
                 if (candidate == null || candidate.IsBot || candidate.Identity == null) continue;
@@ -190,20 +209,52 @@ namespace Factions
                 player = candidate;
                 break;
             }
-            if (player == null) return false;
 
-            IMyCharacter ch = player.Character;
-            if (ch == null) return false;
-            VRageMath.Vector3D world = ch.PositionComp.GetPosition();
+            VRageMath.Vector3D world;
+            if (player != null)
+            {
+                IMyCharacter ch = player.Character;
+                if (ch == null) { cause = "character"; return false; }
+                identityId = player.Identity.IdentityId;
+                world = ch.PositionComp.GetPosition();
+            }
+            else
+            {
+                byte home;
+                identityId = LinkedViewers.IdentityFor(steamId);
+                if (identityId == 0L) { cause = "identity"; return false; }
+                if (!LinkedViewers.TryRemotePosition(steamId, out world, out home)) { cause = "position"; return false; }
+            }
             posKm = new Vec3(world.X / 1000.0, world.Y / 1000.0, world.Z / 1000.0);
 
-            seFaction = MySession.Static.Factions.GetPlayerFaction(player.Identity.IdentityId);
-            if (seFaction == null) return false;
+            seFaction = MySession.Static.Factions.GetPlayerFaction(identityId);
+            if (seFaction == null) { cause = "faction"; return false; }
 
             FactionState owner = _runtime.FindFaction(seFaction.Tag);
             // An NPC tag the brain drives: its territory is the brain's to expand, and the chat verb
             // refuses this same case in the same words.
-            return owner == null || owner.IsPlayerFaction;
+            if (owner != null && !owner.IsPlayerFaction) { cause = "npc:" + seFaction.Tag; return false; }
+            return true;
+        }
+
+        /// <summary>Subscribers whose last status could not be resolved, and why; a cause is logged
+        /// when it first appears or changes, not on every cadence.</summary>
+        private readonly Dictionary<ulong, string> _unresolved = new Dictionary<ulong, string>();
+
+        private void NoteUnresolved(ulong steamId, long identityId, string cause)
+        {
+            string last;
+            if (_unresolved.TryGetValue(steamId, out last) && last == cause) return;
+            _unresolved[steamId] = cause;
+            // A player in no faction has nothing to quote, and the readout would otherwise wait on
+            // "checking..." for an answer that never comes. Sent once, as a commit's answer, because
+            // that is the form every client version announces.
+            if (cause == "faction")
+                _uplink.Send(steamId, FactionsWire.WriteExpandStatus(++_quoteSeq, false, 0, 0, 0, 0, 0, 0, 0, false,
+                                                                     true, WireExpandVerdict.NoFaction, null));
+            if (UplinkManager.DebugTraffic)
+                _uplink.WriteTraffic("EXPAND_UNRESOLVED steam=" + steamId + " identity=" + identityId
+                                     + " remote=" + (_uplink.IsRemote(steamId) ? "yes" : "no") + " cause=" + cause);
         }
 
         /// <summary>Drops subscribers that are no longer online, on the same cadence and for the same
@@ -211,6 +262,10 @@ namespace Factions
         public void PruneOffline(ICollection<ulong> onlineSteamIds)
         {
             if (_streaming.Count == 0) return;
+            List<ulong> gone = null;
+            foreach (ulong steamId in _unresolved.Keys)
+                if (!onlineSteamIds.Contains(steamId)) { if (gone == null) gone = new List<ulong>(); gone.Add(steamId); }
+            if (gone != null) foreach (ulong steamId in gone) _unresolved.Remove(steamId);
             List<ulong> stale = null;
             foreach (ulong steamId in _streaming.Keys)
             {

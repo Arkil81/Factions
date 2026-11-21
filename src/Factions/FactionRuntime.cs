@@ -878,6 +878,7 @@ namespace Factions
                 _playerSiege.Occupied = _occupationSink;
                 _playerSiege.RemoteNotice = _remoteSiegeNotice;
                 _playerSiege.RemotePlayers = _remoteSiegePlayers;
+                _playerSiege.ObservedOnAgent = IsObservedOnAgent;
                 _playerSiege.Register();
                 var vanillaSpawner = _spawner as VanillaFleetSpawner;
                 if (vanillaSpawner != null)
@@ -1110,7 +1111,7 @@ namespace Factions
         {
             if (_world == null) return;
             // A pending restoration match, a bounded slice; nothing when none is pending.
-            PumpRestoreMatch();
+            RestorationRefs.Pump();
             // The one read of each switch: Core takes it from the world as a bool.
             _world.TacticLearning = true;
             DateTime now = DateTime.UtcNow;
@@ -5298,6 +5299,7 @@ namespace Factions
 
             catalogue.SetLivery(id, hint, ownerTag);
             bool written = _customPrefabStore.SetLivery(id, ownerTag, hint);
+            CaptureGeneration++;
             RefreshCatalogueSidecar(catalogue);
             FactionsPlugin.Log.Info("SHIP_LIVERY prefab=" + id + " scope=" + (ownerTag ?? "all") + " livery=" + hint
                                     + (written ? "" : " manifest=unwritten"));
@@ -5325,8 +5327,6 @@ namespace Factions
             if (!TryValidateCaptureRequest(owner, scope, name, usage,
                     out target, out catalogue, out refusal))
                 return refusal;
-            string prefabId = target.PrefabId;
-            bool global = target.OwnerTag == null;
             if (grids == null || grids.Count == 0) return "That's not a ship — look directly at the hull.";
 
             string error;
@@ -5352,6 +5352,18 @@ namespace Factions
             for (int i = 0; i < grids.Count; i++)
                 builders[i] = (MyObjectBuilder_CubeGrid)grids[i].GetObjectBuilder(true);
 
+            return RegisterShipCapture(owner, player.IdentityId, builders, totalBlocks, target, catalogue, factionHint);
+        }
+
+        /// <summary>The registration half of a ship capture, from grids already checked: the
+        /// catalogue entry, the recipe, the store, the sidecar and the <c>SHIP_SCANNED</c> line. A
+        /// Nexus agent's capture arrives here too (<see cref="RegisterRelayedCapture"/>).</summary>
+        private string RegisterShipCapture(FactionState owner, long identityId, MyObjectBuilder_CubeGrid[] builders,
+                                           int totalBlocks, CaptureTarget target, SePrefabCatalogue catalogue,
+                                           string factionHint)
+        {
+            string prefabId = target.PrefabId;
+            bool global = target.OwnerTag == null;
             var entry = new SePrefabCatalogue.Entry
             {
                 Roles       = new List<string>(),
@@ -5370,8 +5382,9 @@ namespace Factions
             if (recipes != null) recipes.RegisterPrefabRecipe(prefabId, builders, fromCapture: true);
 
             if (_customPrefabStore != null)
-                _customPrefabStore.Register(prefabId, builders, ownerFactionTag, player.IdentityId, owner.Tag,
+                _customPrefabStore.Register(prefabId, builders, ownerFactionTag, identityId, owner.Tag,
                     null, null, target.Family, target.Version, factionHint);
+            CaptureGeneration++;
 
             // Without this a mid-session capture stays invisible to the Dashboard ("not in
             // catalogue") until the next full restart.
@@ -5452,8 +5465,6 @@ namespace Factions
             if (!TryValidateCaptureRequest(owner, scope, name, StationScanUsage,
                     out target, out catalogue, out refusal))
                 return refusal;
-            string prefabId = target.PrefabId;
-            bool global = target.OwnerTag == null;
             if (grids == null || grids.Count == 0) return "That's not a station — look directly at the hull.";
 
             string error;
@@ -5484,6 +5495,29 @@ namespace Factions
             for (int i = 0; i < grids.Count; i++)
                 builders[i] = (MyObjectBuilder_CubeGrid)grids[i].GetObjectBuilder(true);
 
+            Vector3D worldPos = grids[0].PositionComp.GetPosition();
+            var posKm = new Vec3(worldPos.X / 1000.0, worldPos.Y / 1000.0, worldPos.Z / 1000.0);
+            string adoptNode = null;
+            if (_stationMaterializer != null)
+                foreach (MyCubeGrid grid in grids)
+                {
+                    if (grid == null) continue;
+                    adoptNode = _stationMaterializer.NodeIdForStationGrid(grid.EntityId);
+                    if (adoptNode != null) break;
+                }
+            return RegisterStationCapture(owner, player.IdentityId, builders, totalBlocks, posKm, target, catalogue, adoptNode);
+        }
+
+        /// <summary>The registration half of a station scan, from grids already checked and with the
+        /// root grid first: the trading-post rules, the measured site, the catalogue entry, the
+        /// recipe, the store, <c>STATION_SCANNED</c>, and the adoption of <paramref name="adoptNodeId"/>
+        /// when the scan was of its standing station. A Nexus agent's scan arrives here too.</summary>
+        private string RegisterStationCapture(FactionState owner, long identityId, MyObjectBuilder_CubeGrid[] builders,
+                                              int totalBlocks, Vec3 posKm, CaptureTarget target,
+                                              SePrefabCatalogue catalogue, string adoptNodeId)
+        {
+            string prefabId = target.PrefabId;
+            bool global = target.OwnerTag == null;
             int stores, contracts, services;
             CountTradingPostBlocks(builders, out stores, out contracts, out services);
             if (stores == 0 || contracts == 0 || services == 0)
@@ -5515,8 +5549,6 @@ namespace Factions
             }
 
             IPlanetCatalogue planets = _world != null && _world.Planets != null ? _world.Planets : _planets;
-            Vector3D worldPos = grids[0].PositionComp.GetPosition();
-            var posKm = new Vec3(worldPos.X / 1000.0, worldPos.Y / 1000.0, worldPos.Z / 1000.0);
             // The three-way classification collapsed by the same helper the refit gate compares on,
             // so an orbital scan is offered at every non-surface node rather than at none.
             string site = StationPrefabSite.For(StationSiting.Classify(planets, posKm));
@@ -5543,8 +5575,9 @@ namespace Factions
             if (recipes != null) recipes.RegisterPrefabRecipe(prefabId, builders, fromCapture: true);
 
             if (_customPrefabStore != null)
-                _customPrefabStore.Register(prefabId, builders, ownerFactionTag, player.IdentityId, owner.Tag,
+                _customPrefabStore.Register(prefabId, builders, ownerFactionTag, identityId, owner.Tag,
                     "Station", site, target.Family, target.Version);
+            CaptureGeneration++;
 
             // Same best-effort sidecar refresh a ship capture does, and for the same reason: the
             // Dashboard reads prefab_catalogue.json verbatim, never the live catalogue.
@@ -5568,7 +5601,7 @@ namespace Factions
             sb.AppendLine("  site=" + site + " blocks=" + totalBlocks + " cost=" + entry.Cost
                           + " dps=" + dps.ToString("0") + " store=" + stores + " contracts=" + contracts
                           + " services=" + services);
-            string adopted = AdoptScannedStation(owner, grids, prefabId);
+            string adopted = AdoptScannedStation(owner, adoptNodeId, prefabId);
             if (adopted != null) sb.AppendLine(adopted);
             sb.Append("Refit a node with: !factions station refit <nodeId> " + (target.Family ?? prefabId));
             return sb.ToString();
@@ -5580,7 +5613,7 @@ namespace Factions
         /// placement solver, and <c>StationMaterializer</c> claims the first spawned grid as the
         /// station. Largest-by-block-count is SE's own rule for the main grid of a group (see
         /// <c>MyRepairServiceComponent</c>). Stable otherwise: a tie keeps the group's order.</summary>
-        private static void PromoteLargestGridToRoot(List<MyCubeGrid> grids)
+        internal static void PromoteLargestGridToRoot(List<MyCubeGrid> grids)
         {
             if (grids == null || grids.Count < 2) return;
             int best = 0;

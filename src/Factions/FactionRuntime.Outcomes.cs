@@ -19,6 +19,10 @@ namespace Factions
         /// viewer who could see it with their tone.</summary>
         internal Action<CombatOutcome, string, List<CombatNotice>> CombatNoticeSink { get; set; }
 
+        /// <summary>Set by a Nexus authority: every resolved fight and its sentence, for the agents
+        /// whose players may be near it.</summary>
+        internal Action<CombatOutcome, string> CombatRelaySink { get; set; }
+
         private void PublishCombatOutcomes()
         {
             List<CombatOutcome> outcomes = _world.TakeCombatOutcomes();
@@ -28,6 +32,8 @@ namespace Factions
                 CombatOutcome o = outcomes[i];
                 string sentence = o.Sentence();
                 SendNearbyFleetMessage(o.PositionKm, sentence);
+                Action<CombatOutcome, string> relay = CombatRelaySink;
+                if (relay != null) relay(o, sentence);
                 Action<CombatOutcome, string, List<CombatNotice>> sink = CombatNoticeSink;
                 if (sink == null || _playersWithin == null) continue;
                 List<CombatNotice> notices = o.Recipients(_playersWithin, _tuning.ObservationRadiusKm, PlayerFactionTag);

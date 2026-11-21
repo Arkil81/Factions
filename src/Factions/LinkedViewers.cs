@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Sandbox.Game.World;
+using VRageMath;
 
 namespace Factions
 {
@@ -34,6 +35,26 @@ namespace Factions
         /// <summary>Authority only: the identity an agent's position report names for a player it
         /// hosts. The fallback for a player this session's own table has not met yet.</summary>
         internal static Func<ulong, long> ReportedIdentity;
+
+        /// <summary>Where a player connected to a Nexus agent stands, and which agent: from that
+        /// agent's position report.</summary>
+        internal delegate bool RemotePositionLookup(ulong steamId, out Vector3D worldM, out byte home);
+
+        /// <summary>Authority only: set while agents report. False when no current report names the
+        /// player.</summary>
+        internal static RemotePositionLookup RemotePosition;
+
+        /// <summary>A relayed client's position by its agent's report; false for a player connected
+        /// here, or one no current report names.</summary>
+        public static bool TryRemotePosition(ulong steamId, out Vector3D worldM, out byte home)
+        {
+            worldM = Vector3D.Zero;
+            home = 0;
+            UplinkManager uplink = Uplink;
+            RemotePositionLookup lookup = RemotePosition;
+            if (uplink == null || lookup == null || !uplink.IsRemote(steamId)) return false;
+            return lookup(steamId, out worldM, out home);
+        }
 
         private static readonly List<LinkedViewer> Scratch = new List<LinkedViewer>();
         private static readonly HashSet<ulong> Seen = new HashSet<ulong>();

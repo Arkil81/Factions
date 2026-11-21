@@ -38,6 +38,10 @@ namespace Factions.Core
         /// holds none. Nexus copies station records between servers only at a save sync, and never a
         /// player faction's, so an agent keeps its own from this.</summary>
         public NexusStationRecord Record;
+        /// <summary>A player faction's node: its hull stock, and the hulls of it listed for sale;
+        /// null when it holds none, and always null for an NPC's node.</summary>
+        public Dictionary<string, int> Hulls;
+        public Dictionary<string, int> Listed;
     }
 
     /// <summary>What an agent needs to rebuild a faction station record as the authority holds it.</summary>
@@ -65,6 +69,17 @@ namespace Factions.Core
         public string Tag;
         public bool Player;
         public string Personality;
+        /// <summary>The registered factions whose members this one refuses at its stations, as
+        /// <see cref="StoreAccess.Decide"/> judges them on the authority; null when none.</summary>
+        public List<NexusTradeBar> Bars;
+    }
+
+    /// <summary>One customer faction a station owner refuses, with what the customer is told.</summary>
+    public sealed class NexusTradeBar
+    {
+        public string Tag;
+        public string Message;
+        public string Cause;
     }
 
     /// <summary>
@@ -90,6 +105,9 @@ namespace Factions.Core
         /// An agent strips and clears only what the authority will refill.</summary>
         public bool Munitions;
         public bool Loot;
+        /// <summary>The authority's capture generation: an agent that sees it change reloads the
+        /// captured designs it spawns from.</summary>
+        public int Captures;
 
         private static readonly JsonSerializerSettings Settings = new JsonSerializerSettings
         {
@@ -101,6 +119,10 @@ namespace Factions.Core
         public static NexusNodeSnapshot Build(IEnumerable<SpatialNode> nodes, IEnumerable<FactionState> factions, long sequence)
         {
             var s = new NexusNodeSnapshot { Sequence = sequence };
+            var players = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (factions != null)
+                foreach (FactionState f in factions)
+                    if (f != null && f.Tag != null && f.IsPlayerFaction) players.Add(f.Tag);
             if (nodes != null)
                 foreach (SpatialNode n in nodes)
                 {
@@ -117,6 +139,11 @@ namespace Factions.Core
                         Value = n.ResourceValue, AsteroidSeed = n.AsteroidFieldSeed,
                         LootRestock = n.LootRestockUtc,
                     };
+                    if (n.OwnerFactionTag != null && players.Contains(n.OwnerFactionTag))
+                    {
+                        if (n.ShipStock.Count > 0) row.Hulls = new Dictionary<string, int>(n.ShipStock, StringComparer.OrdinalIgnoreCase);
+                        if (n.ListedForSale.Count > 0) row.Listed = new Dictionary<string, int>(n.ListedForSale, StringComparer.OrdinalIgnoreCase);
+                    }
                     if (n.Deposit != null)
                     {
                         row.Ores = new List<NexusSnapshotOre>(n.Deposit.Entries.Count);
@@ -132,6 +159,30 @@ namespace Factions.Core
                     s.Factions.Add(new NexusSnapshotFaction { Tag = f.Tag, Player = f.IsPlayerFaction, Personality = f.PersonalityId });
                 }
             return s;
+        }
+
+        /// <summary>Records, on each NPC faction's row, the registered factions it refuses at its
+        /// stations: every pair <see cref="StoreAccess.Decide"/> refuses. A customer in no registered
+        /// faction is judged on the agent by their own reputation, which SE carries there.</summary>
+        public static void FillTradeBars(NexusNodeSnapshot snapshot, IList<FactionState> factions, FactionTuning tuning)
+        {
+            if (snapshot == null || factions == null) return;
+            var byTag = new Dictionary<string, FactionState>(StringComparer.OrdinalIgnoreCase);
+            foreach (FactionState f in factions) if (f != null && f.Tag != null) byTag[f.Tag] = f;
+            foreach (NexusSnapshotFaction row in snapshot.Factions)
+            {
+                FactionState owner;
+                if (row == null || row.Player || row.Tag == null || !byTag.TryGetValue(row.Tag, out owner)) continue;
+                row.Bars = null;
+                foreach (FactionState customer in factions)
+                {
+                    if (customer == null || customer.Tag == null || customer == owner) continue;
+                    StoreAccessDecision d = StoreAccess.Decide(owner, customer, null, tuning);
+                    if (!d.Refused) continue;
+                    if (row.Bars == null) row.Bars = new List<NexusTradeBar>();
+                    row.Bars.Add(new NexusTradeBar { Tag = customer.Tag, Message = d.Message, Cause = d.Cause });
+                }
+            }
         }
 
         /// <summary>The nodes as a graph an agent's materialisers can read. Fresh objects each time:
@@ -157,6 +208,8 @@ namespace Factions.Core
                 n.ZoneIntegrityAtUtc = row.ZoneIntegrityAt;
                 n.AsteroidFieldSeed = row.AsteroidSeed;
                 n.LootRestockUtc = row.LootRestock;
+                if (row.Hulls != null) foreach (KeyValuePair<string, int> h in row.Hulls) n.ShipStock[h.Key] = h.Value;
+                if (row.Listed != null) foreach (KeyValuePair<string, int> h in row.Listed) n.ListedForSale[h.Key] = h.Value;
                 if (row.Ores != null)
                 {
                     n.Deposit = new NodeDeposit();
@@ -339,8 +392,14 @@ namespace Factions.Core
         public List<string> SpawnFailed;
         /// <summary>Recently closed grids that were closed on an order, not shot down.</summary>
         public List<long> Closed;
+        /// <summary>Recently gone grids that left at a position another server's sector holds: Nexus
+        /// carried them across, and the authority holds them in transit for the server that receives
+        /// them instead of reading them as lost.</summary>
+        public List<long> HandedOff;
         /// <summary>Fleet orders applied through this sequence number.</summary>
         public long OrdersThrough;
+        /// <summary>Node stock moves applied through this sequence number.</summary>
+        public long StockMovesThrough;
         /// <summary>The agent's clock when it built this report. The authority shifts the report's
         /// hit and damage times by its own clock's difference, so a skewed shard clock does not
         /// move a hit in or out of a window.</summary>
@@ -367,6 +426,9 @@ namespace Factions.Core
         /// <summary>The seats' grids here that are locked to another grid by a connector, for the
         /// authority's trespass ladder: a docked ship is never lingering. Every report; null for none.</summary>
         public List<long> Docked;
+        /// <summary>The nodes whose NPC station stands here with no working antenna of its owner's,
+        /// so cannot call (<see cref="StationCallRules.Silenced"/>). Every report; null for none.</summary>
+        public List<string> Muted;
         /// <summary>DecisionLog lines written here and not yet acknowledged: a slice, oldest first.</summary>
         public List<NexusLogLine> Log;
         private static readonly JsonSerializerSettings Settings = new JsonSerializerSettings

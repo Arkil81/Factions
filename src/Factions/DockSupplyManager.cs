@@ -56,15 +56,18 @@ namespace Factions
         /// for a reserve; the container volume would stop it anyway, this stops the arithmetic.</summary>
         private const long MaxReserveCount = 1000000;
 
-        private readonly FactionRuntime _runtime;
+        private readonly Func<TerminalWorld> _world;
         private readonly UplinkManager _uplink;
         private readonly StationStoreManager _store;
         private readonly FactionTuning _tuning;
 
-        public DockSupplyManager(FactionRuntime runtime, UplinkManager uplink, StationStoreManager store,
+        /// <param name="world">The model the terminal gate reads: the runtime's, or on a Nexus agent the
+        /// authority's snapshot. On an agent <paramref name="store"/> prices from the shelf rows the
+        /// authority sent and settles by reporting to it.</param>
+        public DockSupplyManager(Func<TerminalWorld> world, UplinkManager uplink, StationStoreManager store,
             FactionTuning tuning)
         {
-            _runtime = runtime;
+            _world = world;
             _uplink = uplink;
             _store = store;
             _tuning = tuning;
@@ -106,7 +109,7 @@ namespace Factions
             }
 
             TerminalContext ctx;
-            if (!TerminalAccess.TryAuthoriseCustomer(_runtime, steamId, terminalEntityId, out ctx, out refusal))
+            if (!TerminalAccess.TryAuthoriseCustomer(_world(), steamId, terminalEntityId, out ctx, out refusal))
                 return false;
 
             MyCubeGrid grid;

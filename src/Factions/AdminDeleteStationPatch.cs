@@ -10,6 +10,8 @@ namespace Factions
     /// Vanilla SE has three interlocking blocks that prevent admins from removing registered
     /// faction stations.  All three are bypassed here because our plugin respawns stations on
     /// its own schedule — the vanilla protection serves no purpose and prevents manual cleanup.
+    /// That holds on a Nexus agent whose hands stand the authority's stations, so it applies there
+    /// too; an agent without hands keeps vanilla's protection.
     ///
     /// Block 1 — admin-menu Remove button (entity-selection path):
     ///   AskIsValidForEdit_Server checks GetStationByGridId → sends canEdit=false to client →
@@ -32,7 +34,7 @@ namespace Factions
         [HarmonyPrefix]
         static void Prefix(long entityId, ref bool canEdit)
         {
-            if (SimulationGate.Deferred) return;
+            if (SimulationGate.Deferred && !SimulationGate.Hands) return;
             canEdit = true;
         }
     }
@@ -43,7 +45,7 @@ namespace Factions
         [HarmonyPrefix]
         static bool Prefix(ref bool __result)
         {
-            if (SimulationGate.Deferred) return true;
+            if (SimulationGate.Deferred && !SimulationGate.Hands) return true;
             __result = false;
             return false; // skip original
         }

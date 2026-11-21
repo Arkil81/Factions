@@ -156,10 +156,22 @@ namespace Factions
             return new WireStatusPanelItem { Key = item.Key, Tone = (byte)item.Tone, Lines = lines };
         }
 
-        private static ulong SteamIdOf(long identityId)
+        /// <summary>The Nexus authority's players on its agents, whose identities this server's
+        /// player table may not map to a Steam id; null elsewhere.</summary>
+        public Func<IList<RemotePlayer>> RemotePlayers { get; set; }
+
+        private ulong SteamIdOf(long identityId)
         {
-            if (identityId == 0 || MySession.Static == null || MySession.Static.Players == null) return 0UL;
-            return MySession.Static.Players.TryGetSteamId(identityId);
+            if (identityId == 0) return 0UL;
+            ulong steam = MySession.Static != null && MySession.Static.Players != null
+                ? MySession.Static.Players.TryGetSteamId(identityId) : 0UL;
+            if (steam != 0UL) return steam;
+            Func<IList<RemotePlayer>> remote = RemotePlayers;
+            IList<RemotePlayer> players = remote != null ? remote() : null;
+            if (players != null)
+                for (int i = 0; i < players.Count; i++)
+                    if (players[i].IdentityId == identityId) return players[i].SteamId;
+            return 0UL;
         }
     }
 }

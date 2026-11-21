@@ -63,9 +63,8 @@ namespace Factions.Commands
             if (!PlayerDiplomacy.TryParse(verb, kind, out act, out error)) { Context.Respond(error); return; }
 
             // The same door the FactionsUI Diplomacy window uses: leader check, then the act.
-            IMyPlayer player = Context.Player;
             bool done;
-            Context.Respond(PlayerDiplomacyAccess.Act(runtime, owner, player != null ? player.IdentityId : 0L,
+            Context.Respond(PlayerDiplomacyAccess.Act(runtime, owner, PlayerCommandHelpers.CallerIdentity(Context),
                                                       act, npcTag, out done));
         }
 

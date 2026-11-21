@@ -43,7 +43,7 @@ namespace Factions.Commands
 
             SpatialNode nearby;
             string resolveError;
-            if (PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, nodes, out nearby, out resolveError))
+            if (PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, nodes, out nearby, out resolveError))
             {
                 Context.Respond(DescribeDetail(owner, nearby));
                 return;
@@ -80,7 +80,7 @@ namespace Factions.Commands
                 newName = SanitizeName(Context.RawArgs);
                 SpatialNode nearby;
                 string resolveError;
-                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, ownedFounded, out nearby, out resolveError))
+                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, ownedFounded, out nearby, out resolveError))
                 {
                     Context.Respond(resolveError);
                     return;
@@ -125,7 +125,7 @@ namespace Factions.Commands
                 style = firstToken;
                 SpatialNode nearby;
                 string resolveError;
-                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, ownedUnfounded, out nearby, out resolveError))
+                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, ownedUnfounded, out nearby, out resolveError))
                 {
                     Context.Respond(resolveError);
                     return;
@@ -258,7 +258,7 @@ namespace Factions.Commands
                     .OwnedBy(owner.Tag).Where(n => n.StableStationId != 0).ToList();
                 SpatialNode nearby;
                 string resolveError;
-                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, ownedFounded, out nearby, out resolveError))
+                if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, ownedFounded, out nearby, out resolveError))
                 {
                     Context.Respond(resolveError);
                     return;
@@ -627,6 +627,13 @@ namespace Factions.Commands
         [Permission(MyPromoteLevel.None)]
         public void Scan(string scope = null, string name = null)
         {
+            AgentCaptures relayed = FactionsPlugin.Instance != null ? FactionsPlugin.Instance.AgentCaptures : null;
+            if (relayed != null)
+            {
+                if (string.IsNullOrEmpty(scope) || string.IsNullOrEmpty(name)) { Context.Respond("Usage: !factions station scan <own|all> <name>"); return; }
+                Context.Respond(relayed.Chat(NexusCaptureKind.Station, Context.Player, scope, name, null));
+                return;
+            }
             FactionState owner;
             string error;
             if (!PlayerCommandHelpers.TryResolveCallerFaction(Context, out owner, out error)) { Context.Respond(error); return; }
@@ -973,7 +980,7 @@ namespace Factions.Commands
             }
 
             SpatialNode nearby;
-            if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, founded, out nearby, out error))
+            if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, founded, out nearby, out error))
                 return false;
 
             nodeId = nearby.Id;
@@ -998,7 +1005,7 @@ namespace Factions.Commands
             }
 
             SpatialNode nearby;
-            if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context.Player, shipyards, out nearby, out error))
+            if (!PlayerCommandHelpers.TryResolveNearestOwnedNode(Context, shipyards, out nearby, out error))
                 return false;
 
             nodeId = nearby.Id;

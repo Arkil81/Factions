@@ -176,5 +176,76 @@ namespace Factions.Core.Tests
             Assert.False(NexusRelayWire.TryReadPlayerPositions(payload, out read));
             Assert.Null(read);
         }
+
+        [Fact]
+        public void ChatCommand_SurvivesTheWire()
+        {
+            var c = new RelayChatCommand { Id = 41, Text = "!factions station status \"Kestrel Yard\"", IdentityId = 144115188075855900L, Promote = 4,
+                                           HasPosition = true, X = -1.5e6, Y = 2.25, Z = 3e5 };
+            byte[] frame = NexusRelayWire.Write(RelayKind.ChatCommand, 2, 76561198000000001UL, NexusRelayWire.WriteChatCommand(c));
+            RelayKind kind; byte home; ulong steam; byte[] payload;
+            Assert.True(NexusRelayWire.TryRead(frame, out kind, out home, out steam, out payload));
+            Assert.Equal(RelayKind.ChatCommand, kind);
+            RelayChatCommand back;
+            Assert.True(NexusRelayWire.TryReadChatCommand(payload, out back));
+            Assert.Equal(41, back.Id);
+            Assert.Equal(c.Text, back.Text);
+            Assert.Equal(144115188075855900L, back.IdentityId);
+            Assert.Equal(4, back.Promote);
+            Assert.True(back.HasPosition);
+            Assert.Equal(-1.5e6, back.X);
+            Assert.Equal(3e5, back.Z);
+        }
+
+        [Fact]
+        public void ChatReply_KeepsEveryLineInOrder()
+        {
+            var lines = new System.Collections.Generic.List<string> { "first", "", "third\nwith a break" };
+            byte[] frame = NexusRelayWire.Write(RelayKind.ChatReply, 3, 7UL, NexusRelayWire.WriteChatReply(9, lines));
+            RelayKind kind; byte home; ulong steam; byte[] payload;
+            Assert.True(NexusRelayWire.TryRead(frame, out kind, out home, out steam, out payload));
+            Assert.Equal(RelayKind.ChatReply, kind);
+            long id; System.Collections.Generic.List<string> back;
+            Assert.True(NexusRelayWire.TryReadChatReply(payload, out id, out back));
+            Assert.Equal(9, id);
+            Assert.Equal(lines, back);
+        }
+
+        [Fact]
+        public void ChatReply_ACorruptCountOrTrailingBytesAreRejected()
+        {
+            long id; System.Collections.Generic.List<string> back;
+            byte[] corrupt = new byte[12];
+            System.BitConverter.GetBytes(int.MaxValue).CopyTo(corrupt, 8);
+            Assert.False(NexusRelayWire.TryReadChatReply(corrupt, out id, out back));
+
+            byte[] ok = NexusRelayWire.WriteChatReply(1, new[] { "x" });
+            byte[] padded = new byte[ok.Length + 1];
+            System.Array.Copy(ok, padded, ok.Length);
+            Assert.False(NexusRelayWire.TryReadChatReply(padded, out id, out back));
+        }
+
+        [Fact]
+        public void AnUnknownKindIsRejected()
+        {
+            byte[] frame = NexusRelayWire.Write((RelayKind)((byte)NexusRelayWire.LastKind + 1), 2, 1UL, null);
+            RelayKind kind; byte home; ulong steam; byte[] payload;
+            Assert.False(NexusRelayWire.TryRead(frame, out kind, out home, out steam, out payload));
+        }
+
+        /// <summary>A kind declared but above the read bound is sent and then dropped on arrival,
+        /// silently: the captures and wing calls were, until the bound followed the enum.</summary>
+        [Fact]
+        public void EveryDeclaredKindIsReadBack()
+        {
+            foreach (RelayKind declared in System.Enum.GetValues(typeof(RelayKind)))
+            {
+                byte[] frame = NexusRelayWire.Write(declared, 3, 9UL, new byte[] { 7 });
+                RelayKind kind; byte home; ulong steam; byte[] payload;
+                Assert.True(NexusRelayWire.TryRead(frame, out kind, out home, out steam, out payload), declared.ToString());
+                Assert.Equal(declared, kind);
+                Assert.True(declared <= NexusRelayWire.LastKind, declared.ToString());
+            }
+        }
     }
 }

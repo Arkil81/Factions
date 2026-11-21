@@ -32,7 +32,10 @@ namespace Factions
     /// per player and needs no persisted state.</para>
     ///
     /// <para>Withheld from a relayed client (<see cref="UplinkManager.RemoteWithheldFeatures"/>): the
-    /// respawn request is handled by the process the player is connected to.</para>
+    /// respawn request is handled by the process the player is connected to. A Nexus agent serves it
+    /// itself (<see cref="UplinkManager.AgentLocalFeatures"/>) over the authority's snapshot graph,
+    /// offering only the nodes inside its own sectors: a character placed in another server's sector
+    /// would arrive where this server holds nothing.</para>
     /// </summary>
     internal sealed class NodeSpawnManager
     {
@@ -41,15 +44,35 @@ namespace Factions
 
         internal static NodeSpawnManager Instance;
 
-        private readonly FactionRuntime _runtime;
+        /// <summary>True while <see cref="Instance"/> is a Nexus agent's, over the snapshot graph.</summary>
+        internal static bool OnAgent;
+
+        /// <summary>Where a player respawning at a node is set down
+        /// (<see cref="StationMaterializer.TryGetArrivalFrame"/>).</summary>
+        internal delegate bool ArrivalFrame(SpatialNode node, out Vector3D stationPos, out Vector3D stationUp,
+                                            out float clearanceM, out string error);
+
+        private readonly Func<SpatialGraph> _graph;
+        private readonly ArrivalFrame _frame;
+        /// <summary>Whether a node may be offered from this process; null offers every node.</summary>
+        private readonly Func<SpatialNode, bool> _here;
         private readonly UplinkManager _uplink;
         private readonly DecisionLog _log;
         private readonly Dictionary<long, DateTime> _lastSpawnUtc = new Dictionary<long, DateTime>();
         private readonly Random _rng = new Random();
 
         public NodeSpawnManager(FactionRuntime runtime, UplinkManager uplink, DecisionLog log)
+            : this(() => runtime != null && runtime.World != null ? runtime.World.Graph : null,
+                   runtime != null ? (ArrivalFrame)runtime.TryGetStationArrivalFrame : null, null, uplink, log)
         {
-            _runtime = runtime;
+        }
+
+        public NodeSpawnManager(Func<SpatialGraph> graph, ArrivalFrame frame, Func<SpatialNode, bool> here,
+                                UplinkManager uplink, DecisionLog log)
+        {
+            _graph = graph;
+            _frame = frame;
+            _here = here;
             _uplink = uplink;
             _log = log;
             if (_uplink != null) _uplink.RegisterHandler(WireMessageKind.NodeSpawnListRequest, OnListRequest);
@@ -72,12 +95,15 @@ namespace Factions
         {
             if (_uplink == null) return;
             var rows = new List<WireNodeSpawnRow>();
-            if (player != null && player.Identity != null && _runtime != null && _runtime.World != null)
+            SpatialGraph graph = _graph != null ? _graph() : null;
+            if (player != null && player.Identity != null && graph != null)
             {
                 long identityId = player.Identity.IdentityId;
-                foreach (NodeSpawnOption o in NodeSpawnPolicy.Options(_runtime.World.Graph,
+                foreach (NodeSpawnOption o in NodeSpawnPolicy.Options(graph,
                              FactionTagOf(identityId), DateTime.UtcNow, LastSpawn(identityId)))
                 {
+                    SpatialNode node;
+                    if (_here != null && (!graph.Nodes.TryGetValue(o.NodeId, out node) || !_here(node))) continue;
                     rows.Add(new WireNodeSpawnRow
                     {
                         NodeId = o.NodeId,
@@ -103,11 +129,12 @@ namespace Factions
         {
             spawn = MatrixD.Identity;
             nodeId = null;
-            if (player == null || player.Identity == null || _runtime == null || _runtime.World == null) return false;
+            SpatialGraph graph = _graph != null ? _graph() : null;
+            if (player == null || player.Identity == null || graph == null || _frame == null) return false;
 
             long identityId = player.Identity.IdentityId;
             ulong steamId = player.Id.SteamId;
-            SpatialNode node = NodeSpawnPolicy.FindByStation(_runtime.World.Graph, stationId);
+            SpatialNode node = NodeSpawnPolicy.FindByStation(graph, stationId);
             string tag = FactionTagOf(identityId);
 
             string refusal = null;
@@ -116,6 +143,7 @@ namespace Factions
             {
                 NodeSpawnBlock block = NodeSpawnPolicy.Check(node, tag, DateTime.UtcNow, LastSpawn(identityId));
                 if (block != NodeSpawnBlock.None) refusal = block.ToString();
+                else if (_here != null && !_here(node)) refusal = "other-server";
             }
 
             Vector3D stationPos = Vector3D.Zero, stationUp = Vector3D.Up;
@@ -123,7 +151,7 @@ namespace Factions
             if (refusal == null)
             {
                 string error;
-                if (!_runtime.TryGetStationArrivalFrame(node, out stationPos, out stationUp, out clearanceM, out error))
+                if (!_frame(node, out stationPos, out stationUp, out clearanceM, out error))
                     refusal = "no-frame (" + error + ")";
             }
 

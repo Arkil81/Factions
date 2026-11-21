@@ -459,7 +459,8 @@
       "NativeCrops": ["Mushrooms"],
       "// Fauna": "Animal spawn rules, applied server-side in place of the generator's own lists where one matches (docs/world-builder.md, 'Fauna authored in the recipe'). First match wins; where none matches the generator's own animals carry on. Absent numbers keep the generator's. Wave is inclusive. Assignments: operator, 2026-10-11.",
       "Fauna": [
-        { "Animals": ["Stone_Monster", "SpaceSpider", "SpaceSpiderBrown", "SpaceSpiderBlack"] }
+        { "Animals": ["Stone_Monster", "SpaceSpider", "SpaceSpiderBrown", "SpaceSpiderBlack"],
+          "DelaySeconds": [125, 270], "Wave": [2, 3] }
       ]
     },
     {
@@ -475,9 +476,9 @@
       "Recruits": true,
       "Fauna": [
         { "Animals": ["Cow_Bot", "Sheep_Bot", "Horse_Bot", "deer_bot", "deerbuck_bot"], "When": "Day",
-          "DelaySeconds": [125, 270], "Wave": [10, 20], "DistanceM": [100, 250] },
+          "DelaySeconds": [125, 270], "Wave": [2, 3], "DistanceM": [100, 250] },
         { "Animals": ["Wolf"], "When": "Night",
-          "DelaySeconds": [125, 270], "Wave": [20, 40], "DistanceM": [100, 250] }
+          "DelaySeconds": [125, 270], "Wave": [3, 6], "DistanceM": [100, 250] }
       ]
     },
     {
@@ -489,7 +490,8 @@
       "// NativeCrops": "Kor's planet definition carries no forageable rule: nothing grows wild, so every crop on Kor starts from an imported seed.",
       "NativeCrops": [],
       "Fauna": [
-        { "Animals": ["LavaPup", "SpaceSpider", "SpaceSpiderBrown", "SpaceSpiderBlack"] }
+        { "Animals": ["LavaPup", "SpaceSpider", "SpaceSpiderBrown", "SpaceSpiderBlack"],
+          "DelaySeconds": [125, 270], "Wave": [2, 3] }
       ]
     }
   ],

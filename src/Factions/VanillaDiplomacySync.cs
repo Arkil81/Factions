@@ -219,7 +219,11 @@ namespace Factions
                 if (VanillaDiplomacyBroadcast.Raising) return;
                 VanillaFactionAct act = VanillaDiplomacyBroadcast.FromSe(action);
                 if (!VanillaDiplomacy.IsDiplomaticAct(act)) return;
-                if (SimulationGate.Deferred) return;
+                if (SimulationGate.Deferred)
+                {
+                    JudgeOnAgent(action, act, fromFactionId, toFactionId, senderId, ref __result);
+                    return;
+                }
 
                 FactionRuntime runtime = FactionsPlugin.Instance?.Runtime;
                 FactionTuning tuning = runtime?.World?.Tuning;
@@ -296,6 +300,80 @@ namespace Factions
                 // screen for everyone.
                 Log.Error(ex, "Judging a vanilla diplomacy request failed; SE's own verdict was used.");
             }
+        }
+
+        /// <summary>
+        /// The same verdict on a Nexus agent, where a player on this server pressed the button. The
+        /// request is judged here because Nexus carries only a request vanilla accepted to the other
+        /// servers, and there as an accomplished change: the authority never runs its own check for
+        /// it. Scope and registration come from the authority's snapshot. What changes Factions'
+        /// state, a truce offer or its withdrawal, goes to the authority as a store event; a refusal
+        /// and the auto-accept switch are this server's own.
+        /// </summary>
+        private static void JudgeOnAgent(MyFactionStateChange action, VanillaFactionAct act, long fromFactionId,
+                                         long toFactionId, long senderId, ref bool __result)
+        {
+            FactionsPlugin plugin = FactionsPlugin.Instance;
+            MySession session = MySession.Static;
+            if (plugin == null || session == null || session.Factions == null || session.Players == null) return;
+
+            MyFaction seFrom = session.Factions.TryGetFactionById(fromFactionId) as MyFaction;
+            MyFaction seTo = session.Factions.TryGetFactionById(toFactionId) as MyFaction;
+            if (seFrom == null || seTo == null) return;
+
+            NexusSnapshotFaction npc = plugin.AgentFactionRow(seTo.Tag);
+            bool inScope = seFrom.FactionType == MyFactionTypes.PlayerMade && npc != null && !npc.Player;
+            if (!inScope) return;
+
+            NexusSnapshotFaction player = plugin.AgentFactionRow(seFrom.Tag);
+            bool registered = player != null && player.Player;
+            bool playerSent = senderId != 0L;
+            ulong senderSteam = playerSent ? session.Players.TryGetSteamId(senderId) : 0UL;
+            bool leader = playerSent && seFrom.IsLeader(senderId);
+            bool admin = senderSteam != 0UL && session.IsUserAdmin(senderSteam);
+
+            VanillaRequestVerdict verdict = VanillaDiplomacy.JudgeRequest(
+                act, playerSent, inScope, leader, admin, __result, registered);
+            if (DebugTraces.Diplomacy)
+                Log.Info("DIPLOMACY_VANILLA_REQUEST act=" + action + " from=" + seFrom.Tag + " to=" + seTo.Tag
+                         + " sender=" + senderId + " leader=" + (leader ? "yes" : "no") + " admin=" + (admin ? "yes" : "no")
+                         + " vanilla=" + (__result ? "accepted" : "refused") + " verdict=" + verdict + " agent=yes");
+
+            switch (verdict)
+            {
+                case VanillaRequestVerdict.RefuseNotLeader:
+                    __result = false;
+                    plugin.WhisperLocal(senderSteam, "Only a leader of " + seFrom.Tag
+                        + " can declare war or make peace for it.");
+                    return;
+
+                case VanillaRequestVerdict.OfferPeaceAndKeep:
+                    plugin.RecordAgentStoreEvent(PeaceEvent(seFrom.Tag, seTo.Tag, true, senderId, senderSteam));
+                    if (seTo.AutoAcceptPeace)
+                    {
+                        seTo.AutoAcceptPeace = false;
+                        Log.Info("Auto-accept peace turned off for managed NPC faction " + seTo.Tag + ".");
+                    }
+                    return;
+
+                case VanillaRequestVerdict.OfferPeaceAndSuppress:
+                    plugin.RecordAgentStoreEvent(PeaceEvent(seFrom.Tag, seTo.Tag, true, senderId, senderSteam));
+                    __result = false;
+                    return;
+
+                case VanillaRequestVerdict.WithdrawAndKeep:
+                    plugin.RecordAgentStoreEvent(PeaceEvent(seFrom.Tag, seTo.Tag, false, senderId, senderSteam));
+                    return;
+            }
+        }
+
+        private static NexusStoreEvent PeaceEvent(string playerTag, string npcTag, bool offer, long sender, ulong steam)
+        {
+            return new NexusStoreEvent
+            {
+                Kind = NexusStoreEventKind.Diplomacy, Seller = playerTag, Key = npcTag, Buy = offer,
+                Buyer = sender, Steam = steam,
+            };
         }
     }
 }

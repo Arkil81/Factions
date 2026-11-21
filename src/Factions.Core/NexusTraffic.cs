@@ -8,9 +8,8 @@ namespace Factions.Core
     /// the authority's <see cref="TrafficEvent"/> plus what the authority resolves for it (the node's
     /// name, its owner, the controller's speaker). Flat and short-named: it rides every reply.
     /// </summary>
-    public sealed class NexusTrafficCall
+    public sealed class NexusTrafficCall : NexusRelayedCall
     {
-        public long Seq;
         public int Kind;
         public string Node;
         public double Nx, Ny, Nz;
@@ -81,7 +80,20 @@ namespace Factions.Core
     /// lost reply loses the calls it carried. An agent that has not taken any for a while gets only
     /// what is still fresh.
     /// </summary>
-    public sealed class NexusTrafficRelay
+    public sealed class NexusTrafficRelay : NexusFreshRelay<NexusTrafficCall> { }
+
+    /// <summary>A call an authority hands its agents once, numbered by <see cref="NexusFreshRelay{T}"/>.</summary>
+    public abstract class NexusRelayedCall
+    {
+        public long Seq;
+    }
+
+    /// <summary>
+    /// Authority: the calls of the last few seconds, handed to each agent once. Not acknowledged and
+    /// not re-sent: a call heard late is wrong rather than late, so a lost reply loses the calls it
+    /// carried. An agent that has not taken any for a while gets only what is still fresh.
+    /// </summary>
+    public class NexusFreshRelay<T> where T : NexusRelayedCall
     {
         public static readonly TimeSpan MaxAge = TimeSpan.FromSeconds(5);
         public const int Capacity = 500;
@@ -90,15 +102,15 @@ namespace Factions.Core
         {
             public DateTime At;
             public byte Home;
-            public NexusTrafficCall Call;
+            public T Call;
         }
 
         private readonly List<Entry> _recent = new List<Entry>();
         private readonly Dictionary<byte, long> _sentThrough = new Dictionary<byte, long>();
         private long _seq;
 
-        /// <param name="home">The one agent the call is for (a hail to a player there); 0 for every agent.</param>
-        public void Add(NexusTrafficCall call, DateTime nowUtc, byte home = 0)
+        /// <param name="home">The one agent the call is for (a call to a player there); 0 for every agent.</param>
+        public void Add(T call, DateTime nowUtc, byte home = 0)
         {
             if (call == null) return;
             Prune(nowUtc);
@@ -109,18 +121,18 @@ namespace Factions.Core
 
         /// <summary>The fresh calls <paramref name="home"/> has not been handed yet, oldest first;
         /// null when there are none.</summary>
-        public List<NexusTrafficCall> Take(byte home, DateTime nowUtc)
+        public List<T> Take(byte home, DateTime nowUtc)
         {
             Prune(nowUtc);
             long through;
             _sentThrough.TryGetValue(home, out through);
-            List<NexusTrafficCall> list = null;
+            List<T> list = null;
             for (int i = 0; i < _recent.Count; i++)
             {
-                NexusTrafficCall c = _recent[i].Call;
+                T c = _recent[i].Call;
                 if (c.Seq <= through) continue;
                 if (_recent[i].Home != 0 && _recent[i].Home != home) continue;
-                if (list == null) list = new List<NexusTrafficCall>();
+                if (list == null) list = new List<T>();
                 list.Add(c);
             }
             _sentThrough[home] = _seq;

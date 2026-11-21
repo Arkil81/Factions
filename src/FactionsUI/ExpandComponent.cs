@@ -53,6 +53,8 @@ public class ExpandComponent : MySessionComponentBase
     private static readonly Vector2 Anchor = new Vector2(0.5f, 0.020f);
 
     /// <summary>The server's last word. Null until the first status arrives after subscribing.</summary>
+    /// <summary>The server answered that the caller is in no faction; cleared by any readout.</summary>
+    private bool _noFaction;
     private WireExpandStatus? _status;
 
     /// <summary>Why the client currently wants a status stream. Two independent surfaces need it —
@@ -80,6 +82,7 @@ public class ExpandComponent : MySessionComponentBase
     {
         Instance = null;
         _status = null;
+        _noFaction = false;
         _wants.Clear();
         _subscribed = false;
         _confirming = false;
@@ -121,7 +124,7 @@ public class ExpandComponent : MySessionComponentBase
         if (Send(shouldSubscribe ? WireExpandAction.Subscribe : WireExpandAction.Unsubscribe, 0))
         {
             _subscribed = shouldSubscribe;
-            if (!shouldSubscribe) _status = null;
+            if (!shouldSubscribe) { _status = null; _noFaction = false; }
         }
     }
 
@@ -215,8 +218,18 @@ public class ExpandComponent : MySessionComponentBase
         // A commit's answer is announced once and then replaced by the readout tick that follows it,
         // so the outcome is never left standing as the live verdict at a position it no longer
         // describes.
-        if (status.Committed) MyAPIGateway.Utilities.ShowNotification(CommitNotice(status), 8000);
-        else _status = status;
+        if (status.Committed)
+        {
+            MyAPIGateway.Utilities.ShowNotification(CommitNotice(status), 8000);
+            // The server's answer to a readout it cannot quote: the caller is in no faction, and
+            // nothing will follow until they join one and reopen it.
+            if (status.Verdict == WireExpandVerdict.NoFaction && _status == null) _noFaction = true;
+        }
+        else
+        {
+            _status = status;
+            _noFaction = false;
+        }
     }
 
     private static string CommitNotice(WireExpandStatus s)
@@ -251,7 +264,12 @@ public class ExpandComponent : MySessionComponentBase
 
         string text;
         Color colour;
-        if (_status == null)
+        if (_status == null && _noFaction)
+        {
+            text = "SITE  you are not in a faction";
+            colour = OccupiedColour;
+        }
+        else if (_status == null)
         {
             text = "SITE  checking...";
             colour = WaitingColour;

@@ -47,6 +47,10 @@ namespace Factions
         // re-nudged every ~5s tick while they linger.
         private readonly HashSet<string> _nudgedSoloPlayers = new HashSet<string>(StringComparer.Ordinal);
 
+        // Nodes whose standing offer has been whispered to someone who may answer it. An offer first
+        // whispered to a member who may not is whispered again to a leader once one is online.
+        private readonly HashSet<string> _offerReachedLeader = new HashSet<string>(StringComparer.Ordinal);
+
         private ChatManagerServer _chat;
 
         /// <summary>Set on a Nexus authority: the players the agents report. A member there is offered
@@ -63,6 +67,7 @@ namespace Factions
         {
             public MyPlayer Local;
             public ulong Steam;
+            public long Identity;
             public bool IsSome { get { return Local != null || Steam != 0UL; } }
         }
 
@@ -74,13 +79,11 @@ namespace Factions
 
         public void AttachChat(ChatManagerServer chat)
         {
-            _chat = chat;
-            if (_chat != null) _chat.MessageProcessing += OnChatMessageProcessing;
+            _chat = chat;   // whispers only; replies reach Answer through OfferReplyRouter
         }
 
         public void DetachChat()
         {
-            if (_chat != null) _chat.MessageProcessing -= OnChatMessageProcessing;
             _chat = null;
         }
 
@@ -139,7 +142,12 @@ namespace Factions
                 if (offeree != lastWhispered)
                 {
                     _lastWhisperedFactionTag[node.Id] = offeree;
-                    if (offeree != null) WhisperOffer(node, offeree);
+                    _offerReachedLeader.Remove(node.Id);
+                    if (offeree != null) WhisperOffer(node, offeree, false);
+                }
+                else if (offeree != null && !_offerReachedLeader.Contains(node.Id))
+                {
+                    WhisperOffer(node, offeree, true);
                 }
             }
 
@@ -176,15 +184,20 @@ namespace Factions
             return faction.Tag;
         }
 
-        private void WhisperOffer(SpatialNode node, string factionTag)
+        /// <summary>Whispers the offer to an online leader of <paramref name="factionTag"/>, else to an
+        /// online member, who is told a leader must answer. <paramref name="leaderOnly"/>: only a leader
+        /// will do, for an offer a member has already been told about.</summary>
+        private void WhisperOffer(SpatialNode node, string factionTag, bool leaderOnly)
         {
-            Recipient recipient = FindOnlineMember(factionTag);
-            if (!recipient.IsSome) return;
-            string msg = "Our scouts report an unclaimed " + SiteDescription(node) + " (" + node.Id
-                + "). Claim it for " + factionTag + "? Reply yes or no.";
+            bool mayCommand;
+            Recipient recipient = FindOnlineMember(factionTag, out mayCommand);
+            if (!recipient.IsSome || (leaderOnly && !mayCommand)) return;
+            string msg = OfferAuthority.ClaimOfferText(SiteDescription(node), node.Id, factionTag, mayCommand);
             bool remote = recipient.Local == null;
             if (!Whisper(recipient, msg, true)) return;
-            Log.Info("Claim offer sent: " + factionTag + " for node " + node.Id + (remote ? " remote=True" : ""));
+            if (mayCommand) _offerReachedLeader.Add(node.Id);
+            Log.Info("Claim offer sent: " + factionTag + " for node " + node.Id
+                + (mayCommand ? "" : " to a member who is not a leader") + (remote ? " remote=True" : ""));
         }
 
         /// <summary>How a site reads in a whisper: what is under it, or that it is only a claim.</summary>
@@ -220,16 +233,19 @@ namespace Factions
             return recipient.Steam != 0UL && remote != null && remote(recipient.Steam, message, offer);
         }
 
-        /// <summary>An online member of <paramref name="factionTag"/>: one connected here first, else one
-        /// on an agent, by this server's identity for their Steam id.</summary>
-        private Recipient FindOnlineMember(string factionTag)
+        /// <summary>An online member of <paramref name="factionTag"/>, by this server's identity for
+        /// their Steam id: the first who may answer for the faction, else the first found. Players
+        /// connected here come before players on an agent.</summary>
+        private Recipient FindOnlineMember(string factionTag, out bool mayCommand)
         {
+            mayCommand = false;
+            var candidates = new List<Recipient>();
             foreach (MyPlayer player in MySession.Static.Players.GetOnlinePlayers())
             {
                 if (player == null || player.IsBot || player.Identity == null) continue;
                 MyFaction faction = MySession.Static.Factions.GetPlayerFaction(player.Identity.IdentityId);
                 if (faction != null && string.Equals(faction.Tag, factionTag, StringComparison.Ordinal))
-                    return new Recipient { Local = player };
+                    candidates.Add(new Recipient { Local = player, Identity = player.Identity.IdentityId });
             }
             Func<IList<RemotePlayer>> remote = RemotePlayers;
             IList<RemotePlayer> others = remote != null ? remote() : null;
@@ -242,66 +258,66 @@ namespace Factions
                     if (identity == 0) identity = r.IdentityId;
                     MyFaction faction = identity != 0 ? MySession.Static.Factions.GetPlayerFaction(identity) : null;
                     if (faction != null && string.Equals(faction.Tag, factionTag, StringComparison.Ordinal))
-                        return new Recipient { Steam = r.SteamId };
+                        candidates.Add(new Recipient { Steam = r.SteamId, Identity = identity });
                 }
-            return default(Recipient);
+
+            var commands = new List<bool>(candidates.Count);
+            for (int i = 0; i < candidates.Count; i++)
+                commands.Add(PlayerAuthority.MayCommand(candidates[i].Identity, factionTag));
+            int pick = OfferAuthority.PickRecipient(commands);
+            if (pick < 0) return default(Recipient);
+            mayCommand = commands[pick];
+            return candidates[pick];
         }
 
-        // SE has no built-in whisper-reply shorthand, so a player typing one out of habit (from
-        // other games/mods) sends it as literal chat text rather than having it intercepted
-        // client-side — strip it before matching. Live-observed 2026-08-15: "/r yes" arrived
-        // verbatim and missed a bare "yes" match.
-        private static readonly string[] ReplyPrefixes = { "/r ", "/reply " };
-
-        private static bool TryParseYesNo(string rawText, out bool isYes)
+        /// <summary>Adds every claim offer open to <paramref name="identityId"/>'s faction, and
+        /// whether they may answer it, for <see cref="OfferReplyRouter"/>.</summary>
+        public void CollectOpen(long identityId, List<OpenOffer> into)
         {
-            isYes = false;
-            if (string.IsNullOrEmpty(rawText)) return false;
-            string text = rawText.Trim();
-            foreach (string prefix in ReplyPrefixes)
+            if (identityId == 0L || _world == null || _world.Graph == null) return;
+            string factionTag = ResolveEligibleFactionTag(identityId);
+            if (factionTag == null) return;
+            bool mayCommand = PlayerAuthority.MayCommand(identityId, factionTag);
+            foreach (KeyValuePair<string, ClaimOfferState> kv in _stateByNodeId)
             {
-                if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    text = text.Substring(prefix.Length).TrimStart();
-                    break;
-                }
+                if (OfferAuthority.Judge(factionTag, kv.Value.OfferedFactionTag, mayCommand) == OfferReplyVerdict.NotForThem) continue;
+                if (!_world.Graph.Nodes.ContainsKey(kv.Key)) continue;
+                into.Add(new OpenOffer { NodeId = kv.Key, Conquer = false, MayAnswer = mayCommand });
             }
-            text = text.TrimEnd('!', '.', '?', ' ');
-
-            if (string.Equals(text, "yes", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(text, "y", StringComparison.OrdinalIgnoreCase))
-            {
-                isYes = true;
-                return true;
-            }
-            return string.Equals(text, "no", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(text, "n", StringComparison.OrdinalIgnoreCase);
         }
 
-        private void OnChatMessageProcessing(Torch.API.Managers.TorchChatMessage msg, ref bool consumed)
+        /// <summary>A whisper to <paramref name="identityId"/> (this server's identity), here or on the
+        /// agent they are on. <paramref name="offer"/>: the agent captures their next yes or no.</summary>
+        public void Tell(long identityId, string message, bool offer)
         {
-            if (consumed || !msg.AuthorSteamId.HasValue) return;
-            bool isYes;
-            if (!TryParseYesNo(msg.Message, out isYes)) return;
-
-            long identityId = MySession.Static.Players.TryGetIdentityId(msg.AuthorSteamId.Value);
-            if (Answer(identityId, isYes)) consumed = true;
+            Whisper(RecipientOf(identityId), message, offer);
         }
 
         /// <summary>A yes or no from <paramref name="identityId"/> (this server's identity), typed here
-        /// or relayed from the agent they are on. False when no offer stands for their faction.</summary>
-        public bool Answer(long identityId, bool isYes)
+        /// or relayed from the agent they are on, to the offer for <paramref name="nodeId"/>. False when
+        /// no offer for that node stands for their faction.</summary>
+        public bool Answer(long identityId, bool isYes, string nodeId)
         {
+            if (string.IsNullOrEmpty(nodeId)) return false;
             if (identityId == 0L || _world == null || _world.Graph == null) return false;
             string factionTag = ResolveEligibleFactionTag(identityId);
             if (factionTag == null) return false;
 
             foreach (KeyValuePair<string, ClaimOfferState> kv in _stateByNodeId)
             {
-                if (kv.Value.OfferedFactionTag != factionTag) continue;
-                string nodeId = kv.Key;
+                OfferReplyVerdict verdict = OfferAuthority.Judge(factionTag, kv.Value.OfferedFactionTag,
+                    PlayerAuthority.MayCommand(identityId, factionTag));
+                if (verdict == OfferReplyVerdict.NotForThem) continue;
+                if (!string.Equals(kv.Key, nodeId, StringComparison.Ordinal)) continue;
                 SpatialNode node;
                 if (!_world.Graph.Nodes.TryGetValue(nodeId, out node)) return false;
+                if (verdict == OfferReplyVerdict.Refused)
+                {
+                    Log.Info("Claim reply refused: " + factionTag + " for node " + nodeId + ", identity "
+                        + identityId + " is not a leader");
+                    Whisper(RecipientOf(identityId), OfferAuthority.RefusalText(factionTag), false);
+                    return true;
+                }
                 if (isYes)
                 {
                     MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(identityId);
@@ -310,6 +326,7 @@ namespace Factions
                     _runtime.ClaimNodeForPlayerFaction(playerState, nodeId);
                     kv.Value.OfferedFactionTag = null;
                     _lastWhisperedFactionTag.Remove(nodeId);
+                    _offerReachedLeader.Remove(nodeId);
                     Log.Info("Claim accepted: " + factionTag + " claimed node " + nodeId);
                     Whisper(RecipientOf(identityId), factionTag + " now holds " + nodeId + ".", false);
                 }

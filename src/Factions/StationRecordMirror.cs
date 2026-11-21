@@ -56,9 +56,15 @@ namespace Factions
             public bool Any { get { return Created + Moved + Renamed + Replaced > 0; } }
         }
 
+        /// <summary>Agent: the Factions design each node stood as at the last reconcile. A refit from
+        /// one captured design to another keeps the record's SE stand-in, so the design is compared
+        /// as well as the record.</summary>
+        private static readonly Dictionary<string, string> DesignSeen = new Dictionary<string, string>(StringComparer.Ordinal);
+
         /// <summary>Agent: makes every snapshot record exist under its node's owner, with the
         /// authority's name, prefab and type. A record whose prefab or type changed is rebuilt, and a
-        /// station standing for it here is closed so it stands again as the new design.</summary>
+        /// station standing for it here is closed so it stands again as the new design. So is one whose
+        /// node's Factions design changed under an unchanged record.</summary>
         public static Tally Reconcile(NexusNodeSnapshot snapshot, StationMaterializer materializer)
         {
             var t = new Tally();
@@ -75,15 +81,20 @@ namespace Factions
                 if (row == null || row.Record == null || row.Station == 0 || row.Owner == null) continue;
                 MyFaction owner;
                 if (!factionByTag.TryGetValue(row.Owner, out owner)) { t.NoFaction++; continue; }
-                try { ReconcileOne(row, owner, byId, materializer, ref t); }
+                string seen;
+                bool redesigned = row.Id != null && DesignSeen.TryGetValue(row.Id, out seen) && seen != null
+                                  && row.Prefab != null && !string.Equals(seen, row.Prefab, StringComparison.Ordinal);
+                try { ReconcileOne(row, owner, byId, materializer, redesigned, ref t); }
                 catch (Exception ex) { Log.Warn(ex, "StationRecordMirror: record for " + row.Id + " threw."); }
+                if (row.Id != null) DesignSeen[row.Id] = row.Prefab;
             }
             if (t.Created > 0 || t.Moved > 0) StationMaterializer.MarkClaimsDirty();
             return t;
         }
 
         private static void ReconcileOne(NexusSnapshotNode row, MyFaction owner,
-            Dictionary<long, KeyValuePair<MyFaction, MyFactionStation>> byId, StationMaterializer materializer, ref Tally t)
+            Dictionary<long, KeyValuePair<MyFaction, MyFactionStation>> byId, StationMaterializer materializer,
+            bool redesigned, ref Tally t)
         {
             NexusStationRecord r = row.Record;
             KeyValuePair<MyFaction, MyFactionStation> held;
@@ -99,7 +110,7 @@ namespace Factions
             }
 
             var type = (MyStationTypeEnum)r.Type;
-            if (station != null && string.Equals(station.PrefabName, r.Se, StringComparison.Ordinal) && station.Type == type)
+            if (station != null && !redesigned && string.Equals(station.PrefabName, r.Se, StringComparison.Ordinal) && station.Type == type)
             {
                 if (r.Name != null && !string.Equals(station.Name, r.Name, StringComparison.Ordinal)
                     && StationFounder.StationNameSetter != null)

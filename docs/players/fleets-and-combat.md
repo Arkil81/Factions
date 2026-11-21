@@ -76,8 +76,9 @@ You do not need a fleet to attack a station. Players can besiege a Factions stat
    > *You hold (node). Its owner cannot dislodge you. Take it? Reply "yes" to claim it, "no" to leave
    > it standing.*
 
-   Reply `yes` to take it for your faction. Only the player the offer was sent to can answer. You
-   need to be in a faction to take a node.
+   Reply `yes` to take it for your faction. Only a leader of your faction can answer. If you are not
+   a leader, you are told so, and a leader of your faction who is online is offered the node
+   instead. You need to be in a faction to take a node.
 
 Firing on a station's safe zone costs you reputation with its owner, in proportion to the damage.
 This applies to any station your faction does not own, whatever your standing with its owner, so

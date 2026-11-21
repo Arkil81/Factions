@@ -24,10 +24,9 @@ namespace Factions
     /// from SE, the leader check, then <see cref="FactionRuntime.LeaderDiplomacy(FactionState, LeaderAct, string, out bool)"/>.
     /// Nothing the client sends is trusted beyond the act and the NPC tag.</para>
     ///
-    /// <para>Granted on a standalone server and on the authority, and withheld from a relayed client
-    /// (<see cref="UplinkManager.RemoteWithheldFeatures"/>): the leader check reads the caller's SE
-    /// identity from this server's online players, and a caller homed on another server is not
-    /// among them.</para>
+    /// <para>Granted on a standalone server and on the authority, relayed clients included: the
+    /// caller's identity comes from <see cref="LinkedViewers"/>, which resolves a player connected to
+    /// a Nexus agent, and the leader check reads SE's faction table by identity alone.</para>
     /// </summary>
     internal sealed class PlayerDiplomacyManager
     {

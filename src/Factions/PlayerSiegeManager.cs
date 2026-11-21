@@ -134,6 +134,10 @@ namespace Factions
         /// raids on their ground. Null: only this server's players.</summary>
         public Func<IList<RemotePlayer>> RemotePlayers { get; set; }
 
+        /// <summary>Whether a player is at this node's station on a Nexus agent, where the station
+        /// stands and this server's materialiser holds no zone.</summary>
+        public Func<string, bool> ObservedOnAgent { get; set; }
+
         // nodeId -> whether the agent standing the station read it unpowered at its last flush.
         private readonly Dictionary<string, bool> _remotePoweredDown =
             new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -575,6 +579,11 @@ namespace Factions
                 {
                     _raidSiegeByNode.Remove(n.Id);
                     LogLapse(n, false);
+                }
+                else
+                {
+                    Func<string, bool> onAgent = ObservedOnAgent;
+                    if (onAgent != null && onAgent(n.Id)) ShowStatus(n);
                 }
             }
         }

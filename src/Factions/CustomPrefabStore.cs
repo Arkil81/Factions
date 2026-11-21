@@ -7,6 +7,7 @@ using NLog;
 using Sandbox.Game.World;
 using VRage.Game;
 using VRage.ObjectBuilders;
+using VRage.ObjectBuilders.Private;
 
 namespace Factions
 {
@@ -246,6 +247,35 @@ namespace Factions
             ulong size;
             if (!MyObjectBuilderSerializer.DeserializeXML(xml, out defs, out size) || defs == null
                 || defs.Prefabs == null || defs.Prefabs.Length == 0)
+                return null;
+            return defs.Prefabs[0].CubeGrids;
+        }
+
+        /// <summary>A capture's grids as an SE definitions document, the form a Nexus agent sends
+        /// them to the authority in; null when they could not be written.</summary>
+        public static string GridsToXml(MyObjectBuilder_CubeGrid[] grids)
+        {
+            if (grids == null || grids.Length == 0) return null;
+            var prefab = MyObjectBuilderSerializerKeen.CreateNewObject<MyObjectBuilder_PrefabDefinition>();
+            prefab.Id = new SerializableDefinitionId(typeof(MyObjectBuilder_PrefabDefinition), "capture");
+            prefab.CubeGrids = grids;
+            var defs = MyObjectBuilderSerializerKeen.CreateNewObject<MyObjectBuilder_Definitions>();
+            defs.Prefabs = new[] { prefab };
+            using (var ms = new MemoryStream())
+            {
+                if (!MyObjectBuilderSerializerKeen.SerializeXML(ms, defs)) return null;
+                return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+            }
+        }
+
+        /// <summary>The grids <see cref="GridsToXml"/> wrote; null when the document holds none.</summary>
+        public static MyObjectBuilder_CubeGrid[] GridsFromXml(string xml)
+        {
+            if (string.IsNullOrEmpty(xml)) return null;
+            MyObjectBuilder_Definitions defs;
+            ulong size;
+            if (!MyObjectBuilderSerializer.DeserializeXML(System.Text.Encoding.UTF8.GetBytes(xml), out defs, out size)
+                || defs == null || defs.Prefabs == null || defs.Prefabs.Length == 0)
                 return null;
             return defs.Prefabs[0].CubeGrids;
         }

@@ -17,6 +17,13 @@ namespace Factions.Commands
         [Permission(MyPromoteLevel.None)]
         public void Capture(string scope = null, string name = null)
         {
+            AgentCaptures relayed = FactionsPlugin.Instance != null ? FactionsPlugin.Instance.AgentCaptures : null;
+            if (relayed != null)
+            {
+                if (string.IsNullOrEmpty(scope) || string.IsNullOrEmpty(name)) { Context.Respond("Usage: !factions ship capture <own|all> <name>"); return; }
+                Context.Respond(relayed.Chat(NexusCaptureKind.Ship, Context.Player, scope, name, null));
+                return;
+            }
             FactionState owner;
             string error;
             if (!PlayerCommandHelpers.TryResolveCallerFaction(Context, out owner, out error)) { Context.Respond(error); return; }

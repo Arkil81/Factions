@@ -34,14 +34,14 @@ namespace Factions.Commands
             }
 
             Vec3 posKm;
-            if (!PlayerCommandHelpers.TryResolvePositionKm(Context.Player, out posKm, out error))
+            if (!PlayerCommandHelpers.TryResolvePositionKm(Context, out posKm, out error))
             {
                 Context.Respond(error);
                 return;
             }
 
             FactionRuntime runtime = FactionsPlugin.Instance.Runtime;
-            long playerIdentityId = Context.Player.IdentityId;
+            long playerIdentityId = PlayerCommandHelpers.CallerIdentity(Context);
 
             bool commit = !string.IsNullOrEmpty(confirm)
                           && string.Equals(confirm, "confirm", StringComparison.OrdinalIgnoreCase);

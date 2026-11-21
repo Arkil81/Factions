@@ -733,8 +733,75 @@ namespace Factions
 
         public bool GridExists(long entityId)
         {
-            if (IsRemote(entityId)) return Remote.Exists(entityId);
-            return MyEntities.GetEntityById(entityId) != null;
+            if (IsRemote(entityId))
+            {
+                if (_handingOff.Count > 0) _handingOff.Remove(entityId);
+                return Remote.Exists(entityId);
+            }
+            return MyEntities.GetEntityById(entityId) != null || HandingOff(entityId);
+        }
+
+        // ---- Nexus: a grid carried across a sector boundary ----------------------------------
+
+        /// <summary>Authority: the fleet a grid flies for, as its kind and faction; false for a grid no
+        /// fleet holds, which is then not handed off.</summary>
+        internal delegate bool FleetOfGridLookup(long eid, out ActionKind kind, out string factionTag, out long factionId);
+        internal FleetOfGridLookup FleetOfGrid { get; set; }
+
+        private readonly Dictionary<long, DateTime> _handingOff = new Dictionary<long, DateTime>();
+
+        /// <summary>Authority: a grid this server flew that Nexus carried into an agent's sector stands
+        /// for <see cref="NexusFleetRegistry.TransitHold"/> while the agent reports it, and from then on
+        /// is the agent's (<see cref="IsRemote"/>). One no agent reports is gone, as before.</summary>
+        private bool HandingOff(long eid)
+        {
+            if (Remote == null) return false;
+            DateTime now = DateTime.UtcNow;
+            DateTime since;
+            if (_handingOff.TryGetValue(eid, out since))
+            {
+                if (now - since <= NexusFleetRegistry.TransitHold) return true;
+                _handingOff.Remove(eid);
+                Log.Info("NEXUS_FLEET_TRANSIT_LAPSED eid=" + eid);
+                return false;
+            }
+            byte to;
+            string key;
+            if (_closedByUs.ContainsKey(eid) || !SectorHandover.TryTakeLeft(eid, out to, out key) || !Remote.CanFly(to, now))
+                return false;
+            ActionKind kind;
+            string tag;
+            long factionId;
+            if (FleetOfGrid == null || !FleetOfGrid(eid, out kind, out tag, out factionId)) return false;
+            string munitionsId;
+            _munitionIdByEid.TryGetValue(eid, out munitionsId);
+            Remote.Expect(eid, new NexusFleetOrder
+            {
+                Key = key, Eid = eid, Kind = (int)kind, Tag = tag, FactionId = factionId,
+                Prefab = GridPrefabId(eid), MunitionsId = munitionsId,
+            }, LastDamageUtc(eid), now);
+            _handingOff[eid] = now;
+            _flight.Release(eid);
+            Log.Info("NEXUS_FLEET_HANDED_OFF eid=" + eid + " key=" + key + " to=" + to);
+            return true;
+        }
+
+        /// <summary>Takes over a fleet grid that arrived from another server's sector: tracks its damage,
+        /// prefab and munitions as a grid spawned here, and marks its assembly under its fleet. The
+        /// caller sends its leg next.</summary>
+        internal bool AdoptArrival(long eid, string fleetKey, string factionTag, ActionKind kind, string prefab,
+                                   string munitionsId, DateTime? damagedUtc)
+        {
+            MyCubeGrid grid;
+            if (!MyEntities.TryGetEntityById(eid, out grid, false) || grid == null || grid.MarkedForClose) return false;
+            EnsureDamageHandler();
+            _handingOff.Remove(eid);
+            _closedByUs.Remove(eid);
+            _lastDamageUtc[eid] = damagedUtc ?? DateTime.MinValue;
+            if (prefab != null) _prefabByEid[eid] = prefab;
+            if (munitionsId != null) _munitionIdByEid[eid] = munitionsId;
+            SimGridMarks.MarkAssembly(new List<MyCubeGrid> { grid }, fleetKey, factionTag, kind.ToString(), DateTime.UtcNow);
+            return true;
         }
 
         /// <summary>Prefab this grid was spawned from, or null when it was not materialised by this

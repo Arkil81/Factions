@@ -22,6 +22,9 @@ namespace Factions.Core
         Leave = 8,
         /// <summary>End a commander's order and hand the grid back to its cruise autopilot on <c>Tx,Ty,Tz</c>.</summary>
         EndWing = 9,
+        /// <summary>Take over a fleet grid that arrived here from another server's sector, under
+        /// <c>Key</c>, <c>Kind</c>, <c>Tag</c>, <c>Prefab</c> and <c>MunitionsId</c>. A retarget follows.</summary>
+        Adopt = 10,
     }
 
     /// <summary>A held grid's weapon bands.</summary>
@@ -58,7 +61,7 @@ namespace Factions.Core
         public string Key;
         /// <summary>The agent's grid; 0 on a spawn.</summary>
         public long Eid;
-        /// <summary>Spawn only: <see cref="ActionKind"/> as its integer, owner, and prefab.</summary>
+        /// <summary>Spawn and adopt: <see cref="ActionKind"/> as its integer, owner, and prefab.</summary>
         public int Kind;
         public string Tag;
         public long FactionId;
@@ -67,7 +70,7 @@ namespace Factions.Core
         public double X, Y, Z;
         /// <summary>Target in km (spawn, retarget); integrity in <c>Tx</c>.</summary>
         public double Tx, Ty, Tz;
-        /// <summary>Spawn only: the fleet's staged magazines, which replace the prefab's.</summary>
+        /// <summary>Spawn: the fleet's staged magazines, which replace the prefab's. Adopt: the id only.</summary>
         public string MunitionsId;
         public Dictionary<string, long> Munitions;
         /// <summary>Leave only: the clearance to reach, and why.</summary>
@@ -182,6 +185,11 @@ namespace Factions.Core
         public static readonly TimeSpan SpawnTimeout = TimeSpan.FromSeconds(120);
         /// <summary>A gone grid is remembered this long, for the reads made after it went.</summary>
         public static readonly TimeSpan GoneMemory = TimeSpan.FromMinutes(10);
+        /// <summary>How long a grid Nexus carried across a sector boundary is held for the server that
+        /// receives it. Nexus closes it on the source in the frame it sends it and spawns it on the
+        /// target as soon as a free spot is found, so a report a second later normally carries it;
+        /// one that never arrives is gone, read as any other grid that left the world.</summary>
+        public static readonly TimeSpan TransitHold = TimeSpan.FromSeconds(20);
         /// <summary>A grid that hit one of ours is answered for this long after its last report.</summary>
         public static readonly TimeSpan ContactMemory = TimeSpan.FromMinutes(2);
 
@@ -204,6 +212,13 @@ namespace Factions.Core
             public bool Gone;
             public bool ClosedByUs;
             public DateTime GoneUtc;
+            /// <summary>Its home reported it carried into another server's sector; no server holds it yet.</summary>
+            public bool Transit;
+            public DateTime TransitUtc;
+            /// <summary>What the receiving server is told to adopt it as: kind, owner, prefab, munitions.</summary>
+            public NexusFleetOrder Template;
+            /// <summary>The last hit its earlier homes saw: a new home's damage clock starts empty.</summary>
+            public DateTime DamagedFloor = DateTime.MinValue;
             public int ThrustConsumed, GaveUpConsumed;
             public NexusFleetAsk Ask;
             public DateTime LaunchAskUtc, ApproachAskUtc, EscortAskUtc, HoldAskUtc, CombatAskUtc;
@@ -239,6 +254,16 @@ namespace Factions.Core
         private readonly Dictionary<byte, Home> _homes = new Dictionary<byte, Home>();
         private readonly Dictionary<string, long> _completed = new Dictionary<string, long>(StringComparer.Ordinal);
         private readonly Dictionary<long, Contact> _contacts = new Dictionary<long, Contact>();
+        private readonly Dictionary<long, Expected> _expected = new Dictionary<long, Expected>();
+        private readonly List<long> _rehomed = new List<long>();
+
+        /// <summary>A grid the authority flew itself that Nexus carried into an agent's sector.</summary>
+        private sealed class Expected
+        {
+            public NexusFleetOrder Template;
+            public DateTime Damaged;
+            public DateTime SinceUtc;
+        }
         private readonly Dictionary<byte, Dictionary<string, Munitions>> _munitions = new Dictionary<byte, Dictionary<string, Munitions>>();
         private long _lastSeq;
 
@@ -305,6 +330,78 @@ namespace Factions.Core
             return true;
         }
 
+        // ---- sector handover ---------------------------------------------------------------
+
+        /// <summary>A grid the authority flew itself left at a position an agent's sector holds:
+        /// the agent that reports it under <paramref name="template"/>'s key within
+        /// <see cref="TransitHold"/> is told to adopt it.</summary>
+        public void Expect(long eid, NexusFleetOrder template, DateTime? damagedUtc, DateTime nowUtc)
+        {
+            if (eid <= 0 || template == null || template.Key == null || _grids.ContainsKey(eid)) return;
+            _expected[eid] = new Expected { Template = template, Damaged = damagedUtc ?? DateTime.MinValue, SinceUtc = nowUtc };
+        }
+
+        public bool IsExpected(long eid) { return _expected.ContainsKey(eid); }
+
+        /// <summary>A grid an agent flew arrived on the authority: it stops being an agent's, and the
+        /// authority flies it under what this returns. False for a grid it does not hold.</summary>
+        public bool TakeBack(long eid, out NexusFleetOrder template, out DateTime? damagedUtc)
+        {
+            template = null;
+            damagedUtc = null;
+            Grid g;
+            if (!_grids.TryGetValue(eid, out g) || g.Gone) return false;
+            template = AdoptOrder(g);
+            damagedUtc = LastDamageUtc(eid);
+            _grids.Remove(eid);
+            return true;
+        }
+
+        public bool InTransit(long eid) { Grid g; return _grids.TryGetValue(eid, out g) && !g.Gone && g.Transit; }
+
+        /// <summary>The grids that changed server since the last call: each wants its current leg re-sent.</summary>
+        public List<long> TakeRehomed()
+        {
+            var taken = new List<long>(_rehomed);
+            _rehomed.Clear();
+            return taken;
+        }
+
+        private void Rehome(Grid g, byte home, NexusFleetGrid r, DateTime nowUtc)
+        {
+            if (g.Last != null)
+            {
+                if (g.Last.Damaged > g.DamagedFloor) g.DamagedFloor = g.Last.Damaged;
+                if (r.Prefab == null) r.Prefab = g.Last.Prefab;
+            }
+            g.Home = home;
+            g.Transit = false;
+            g.Last = r;
+            g.LeaveSeq = 0;
+            // The new home counts these from zero.
+            g.ThrustConsumed = g.GaveUpConsumed = 0;
+            g.DealtTaken = g.TakenTaken = 0;
+            QueueAdopt(g, nowUtc);
+        }
+
+        private void QueueAdopt(Grid g, DateTime nowUtc)
+        {
+            Queue(HomeOf(g.Home), AdoptOrder(g), nowUtc);
+            _rehomed.Add(g.Eid);
+        }
+
+        private static NexusFleetOrder AdoptOrder(Grid g)
+        {
+            NexusFleetOrder t = g.Template;
+            return new NexusFleetOrder
+            {
+                Op = NexusFleetOp.Adopt, Key = g.Key, Eid = g.Eid, Tag = g.Tag,
+                Kind = t != null ? t.Kind : 0, FactionId = t != null ? t.FactionId : 0,
+                Prefab = g.Last != null && g.Last.Prefab != null ? g.Last.Prefab : t != null ? t.Prefab : null,
+                MunitionsId = t != null ? t.MunitionsId : null,
+            };
+        }
+
         // ---- reads -------------------------------------------------------------------------
 
         /// <summary>Whether <paramref name="eid"/> is a grid on an agent, live or recently gone.</summary>
@@ -317,8 +414,10 @@ namespace Factions.Core
         public DateTime? LastDamageUtc(long eid)
         {
             Grid g;
-            if (!_grids.TryGetValue(eid, out g) || g.Last == null || g.Last.Damaged == DateTime.MinValue) return null;
-            return g.Last.Damaged;
+            if (!_grids.TryGetValue(eid, out g)) return null;
+            DateTime at = g.Last != null && g.Last.Damaged > g.DamagedFloor ? g.Last.Damaged : g.DamagedFloor;
+            if (at == DateTime.MinValue) return null;
+            return at;
         }
 
         public string PrefabOf(long eid) { Grid g; return _grids.TryGetValue(eid, out g) && g.Last != null ? g.Last.Prefab : null; }
@@ -686,7 +785,7 @@ namespace Factions.Core
             if (h.Outbox.Count > 0) orders = new List<NexusFleetOrder>(h.Outbox);
             foreach (Grid g in _grids.Values)
             {
-                if (g.Home != home || g.Gone) continue;
+                if (g.Home != home || g.Gone || g.Transit) continue;
                 if (held == null) held = new List<long>();
                 held.Add(g.Eid);
                 IReadOnlyList<WeaponBand> own = BandsOf != null ? BandsOf(g.Eid) : null;
@@ -795,14 +894,31 @@ namespace Factions.Core
                             g.Last = r;
                             if (g.LeaveSeq != 0 && ordersThrough >= g.LeaveSeq) g.LeaveSeq = 0;
                         }
+                        else if (g.Home != home && !g.Gone && string.Equals(r.Key, g.Key, StringComparison.Ordinal))
+                            Rehome(g, home, r, nowUtc);
+                        continue;
+                    }
+                    Expected x;
+                    if (r.Key != null && _expected.TryGetValue(r.Eid, out x)
+                        && string.Equals(r.Key, x.Template.Key, StringComparison.Ordinal))
+                    {
+                        _expected.Remove(r.Eid);
+                        if (r.Prefab == null) r.Prefab = x.Template.Prefab;
+                        var arrived = new Grid
+                        {
+                            Home = home, Key = r.Key, Eid = r.Eid, Tag = x.Template.Tag, Last = r,
+                            Template = x.Template, DamagedFloor = x.Damaged,
+                        };
+                        _grids[r.Eid] = arrived;
+                        QueueAdopt(arrived, nowUtc);
                         continue;
                     }
                     NexusFleetOrder spawn;
-                    if (r.Key == null || !h.Spawning.TryGetValue(r.Key, out spawn)) continue;   // not ours: the agent reaps it
+                    if (r.Key == null || !h.Spawning.TryGetValue(r.Key, out spawn)) continue;   // not ours: the agent closes it
                     h.Spawning.Remove(r.Key);
                     h.SpawnedUtc.Remove(r.Key);
                     if (r.Prefab == null) r.Prefab = spawn.Prefab;
-                    _grids[r.Eid] = new Grid { Home = home, Key = r.Key, Eid = r.Eid, Tag = spawn.Tag, Last = r };
+                    _grids[r.Eid] = new Grid { Home = home, Key = r.Key, Eid = r.Eid, Tag = spawn.Tag, Last = r, Template = spawn };
                     _completed[r.Key] = r.Eid;
                     finished.Add(r.Key);
                 }
@@ -815,8 +931,19 @@ namespace Factions.Core
                     Grid g;
                     if (_grids.TryGetValue(eid, out g) && g.Home == home) g.ClosedByUs = true;
                 }
+            HashSet<long> handedOff = report.HandedOff != null && report.HandedOff.Count > 0 ? new HashSet<long>(report.HandedOff) : null;
             foreach (Grid g in _grids.Values)
-                if (g.Home == home && !g.Gone && !present.Contains(g.Eid)) MarkGone(g, g.ClosedByUs, nowUtc);
+            {
+                if (g.Home != home || g.Gone || g.Transit || present.Contains(g.Eid)) continue;
+                if (handedOff != null && handedOff.Contains(g.Eid) && !g.ClosedByUs)
+                {
+                    g.Transit = true;
+                    g.TransitUtc = nowUtc;
+                    g.Ask = null;
+                    continue;
+                }
+                MarkGone(g, g.ClosedByUs, nowUtc);
+            }
             if (report.Munitions != null)
             {
                 Dictionary<string, Munitions> byId = MunitionsOf(home);
@@ -872,6 +999,16 @@ namespace Factions.Core
                     kv.Value.Session = null;
                     kv.Value.Fleets = false;
                 }
+            foreach (Grid g in _grids.Values)
+                if (g.Transit && !g.Gone && nowUtc - g.TransitUtc > TransitHold)
+                {
+                    g.Transit = false;
+                    MarkGone(g, false, nowUtc);
+                }
+            List<long> lapsed = null;
+            foreach (KeyValuePair<long, Expected> kv in _expected)
+                if (nowUtc - kv.Value.SinceUtc > TransitHold) (lapsed ?? (lapsed = new List<long>())).Add(kv.Key);
+            if (lapsed != null) foreach (long eid in lapsed) _expected.Remove(eid);
             List<long> forget = null;
             foreach (Grid g in _grids.Values)
                 if (g.Gone && nowUtc - g.GoneUtc > GoneMemory) (forget ?? (forget = new List<long>())).Add(g.Eid);
@@ -934,8 +1071,9 @@ namespace Factions.Core
         /// <summary>The agent's grids are gone with its process: closed by us, never shot down.</summary>
         private void Lose(byte home, Home h, DateTime nowUtc, List<string> finished)
         {
+            // One in transit has left this server already: its new home settles it.
             foreach (Grid g in _grids.Values)
-                if (g.Home == home && !g.Gone) MarkGone(g, true, nowUtc);
+                if (g.Home == home && !g.Gone && !g.Transit) MarkGone(g, true, nowUtc);
             foreach (string key in h.Spawning.Keys) { _completed[key] = 0; finished.Add(key); }
             h.Spawning.Clear();
             h.SpawnedUtc.Clear();

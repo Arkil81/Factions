@@ -310,13 +310,19 @@ namespace Factions.Commands
         public void LiveryCapture(string tag = null, string name = null)
         {
             if (FactionsPlugin.Instance == null) { Context.Respond("Factions plugin not initialised."); return; }
-            FactionRuntime runtime = FactionsPlugin.Instance.Runtime;
-            if (runtime == null) { Context.Respond("Runtime not started (no session loaded)."); return; }
             if (string.IsNullOrEmpty(tag) || string.IsNullOrEmpty(name))
             {
                 Context.Respond("Usage: !factions livery capture <tag> <name>");
                 return;
             }
+            AgentCaptures relayed = FactionsPlugin.Instance.AgentCaptures;
+            if (relayed != null)
+            {
+                Context.Respond(relayed.Chat(NexusCaptureKind.Livery, Context.Player, null, name, tag));
+                return;
+            }
+            FactionRuntime runtime = FactionsPlugin.Instance.Runtime;
+            if (runtime == null) { Context.Respond("Runtime not started (no session loaded)."); return; }
             Context.Respond(runtime.CaptureShipForFaction(Context.Player, tag, name));
         }
 

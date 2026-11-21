@@ -28,13 +28,24 @@ namespace Factions
     /// </summary>
     internal static class WingWorld
     {
+        /// <summary>Nexus authority: what agents read of the antennas and targets of orders given
+        /// there, served for an entity this server does not have. Null elsewhere.</summary>
+        internal static NexusWingReadings Relayed;
+
         /// <summary>The antenna, and the grid it stands on (zero when there is none).</summary>
         public static WingAntennaReading ReadAntenna(long antennaEntityId, out long gridEntityId)
         {
             gridEntityId = 0;
             var r = new WingAntennaReading();
             IMyRadioAntenna antenna = antennaEntityId != 0 ? MyEntities.GetEntityById(antennaEntityId) as IMyRadioAntenna : null;
-            if (antenna == null || antenna.Closed || antenna.MarkedForClose) return r;
+            if (antenna == null)
+            {
+                NexusWingReadings relayed = Relayed;
+                WingAntennaReading read;
+                if (relayed != null && relayed.TryAntenna(antennaEntityId, DateTime.UtcNow, out read, out gridEntityId)) return read;
+                return r;
+            }
+            if (antenna.Closed || antenna.MarkedForClose) return r;
             r.Exists = true;
             r.Functional = antenna.IsFunctional;
             r.Enabled = antenna.Enabled;
@@ -75,6 +86,13 @@ namespace Factions
         {
             var t = new WingTargetReading { EntityId = gridEntityId };
             MyCubeGrid grid;
+            if (gridEntityId != 0 && !MyEntities.TryGetEntityById(gridEntityId, out grid, false))
+            {
+                NexusWingReadings relayed = Relayed;
+                WingTargetReading read;
+                if (relayed != null && relayed.TryTarget(gridEntityId, commanderIdentityId, DateTime.UtcNow, out read)) return read;
+                return t;
+            }
             if (gridEntityId == 0 || !MyEntities.TryGetEntityById(gridEntityId, out grid, false)
                 || grid.Closed || grid.MarkedForClose)
                 return t;
@@ -125,6 +143,17 @@ namespace Factions
         {
             pilotLock = combatBlockLock = cockpitRetained = 0;
             MyCubeGrid grid;
+            if (gridEntityId != 0 && !MyEntities.TryGetEntityById(gridEntityId, out grid, false))
+            {
+                NexusWingReadings.StationGrid relayed;
+                if (TryRelayedStation(gridEntityId, out relayed))
+                {
+                    pilotLock = relayed.Pilot;
+                    combatBlockLock = relayed.Combat;
+                    cockpitRetained = relayed.Retained;
+                }
+                return;
+            }
             if (gridEntityId == 0 || !MyEntities.TryGetEntityById(gridEntityId, out grid, false) || grid.Closed) return;
             var grids = new List<MyCubeGrid>();
             if (MyCubeGridGroups.Static != null && MyCubeGridGroups.Static.Logical != null)
@@ -153,10 +182,23 @@ namespace Factions
 
         private static readonly List<MyEntity> NearScratch = new List<MyEntity>();
 
-        /// <summary>Whether the grid is in the world.</summary>
+        /// <summary>A station grid on a Nexus agent whose call is being read there and relayed; false
+        /// when this server is not the authority or the readings are stale.</summary>
+        private static bool TryRelayedStation(long gridEntityId, out NexusWingReadings.StationGrid station)
+        {
+            NexusWingReadings relayed = Relayed;
+            if (relayed != null && relayed.TryStation(gridEntityId, DateTime.UtcNow, out station)) return true;
+            station = default(NexusWingReadings.StationGrid);
+            return false;
+        }
+
+        /// <summary>Whether the grid is in the world: here, or on the agent relaying its station's call.</summary>
         public static bool GridExists(long gridEntityId)
         {
             MyCubeGrid grid;
+            NexusWingReadings.StationGrid relayed;
+            if (gridEntityId != 0 && !MyEntities.TryGetEntityById(gridEntityId, out grid, false))
+                return TryRelayedStation(gridEntityId, out relayed);
             return gridEntityId != 0 && MyEntities.TryGetEntityById(gridEntityId, out grid, false)
                 && !grid.Closed && !grid.MarkedForClose;
         }
@@ -173,6 +215,9 @@ namespace Factions
         public static bool IsStaticGrid(long gridEntityId)
         {
             MyCubeGrid grid;
+            NexusWingReadings.StationGrid relayed;
+            if (gridEntityId != 0 && !MyEntities.TryGetEntityById(gridEntityId, out grid, false))
+                return TryRelayedStation(gridEntityId, out relayed) && relayed.Static;
             return gridEntityId != 0 && MyEntities.TryGetEntityById(gridEntityId, out grid, false)
                 && !grid.Closed && grid.IsStatic;
         }
@@ -182,6 +227,12 @@ namespace Factions
         {
             into.Clear();
             MyCubeGrid grid;
+            NexusWingReadings.StationGrid relayed;
+            if (gridEntityId != 0 && !MyEntities.TryGetEntityById(gridEntityId, out grid, false))
+            {
+                if (TryRelayedStation(gridEntityId, out relayed) && relayed.Antennas != null) into.AddRange(relayed.Antennas);
+                return;
+            }
             if (gridEntityId == 0 || !MyEntities.TryGetEntityById(gridEntityId, out grid, false) || grid.Closed) return;
             foreach (MyCubeBlock block in grid.GetFatBlocks())
                 if (block is IMyRadioAntenna) into.Add(block.EntityId);
@@ -263,6 +314,9 @@ namespace Factions
         public static long NearestHostileGrid(long stationGridId, long ownerIdentityId, double radiusM)
         {
             MyCubeGrid station;
+            NexusWingReadings.StationGrid relayed;
+            if (stationGridId != 0 && !MyEntities.TryGetEntityById(stationGridId, out station, false))
+                return TryRelayedStation(stationGridId, out relayed) ? relayed.HostileNear : 0;
             if (stationGridId == 0 || !MyEntities.TryGetEntityById(stationGridId, out station, false) || station.Closed) return 0;
             Vector3D c = station.PositionComp.WorldVolume.Center;
             var sphere = new BoundingSphereD(c, radiusM);

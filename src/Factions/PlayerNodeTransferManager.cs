@@ -65,6 +65,10 @@ namespace Factions
         private readonly UplinkManager _uplink;
         private readonly DefinitionIdResolver _resolveDefinition;
 
+        /// <summary>Authority on a cluster: queues a stock move for the agent a player is connected
+        /// to. The block and the goods are there; the node's stock is here.</summary>
+        internal Action<byte, NexusStockMove> QueueRemoteMove { get; set; }
+
         public PlayerNodeTransferManager(FactionRuntime runtime, UplinkManager uplink,
                                          DefinitionIdResolver resolveDefinition)
         {
@@ -218,6 +222,12 @@ namespace Factions
                 return;
             }
 
+            if (_uplink.IsRemote(steamId))
+            {
+                QueueRemote(steamId, node, deposit, invKey, amount, targetEntityId);
+                return;
+            }
+
             MyEntity target;
             if (!TryResolveTarget(targetEntityId, node, out target, out refusal))
             {
@@ -251,20 +261,8 @@ namespace Factions
             moved = 0;
             DateTime now = _runtime.World != null ? _runtime.World.UtcNow : DateTime.UtcNow;
             long routable = NodeTransfer.Withdrawable(node, invKey, now);
-            if (routable <= 0)
-            {
-                long reserved = NodeTransfer.Reserved(node, invKey, now);
-                message = reserved > 0
-                    ? "All " + reserved + " of " + invKey + " here is reserved for an active build or a capability install."
-                    : node.DisplayName + " holds no " + invKey + ".";
-                return false;
-            }
-            if (amount > routable)
-            {
-                message = "Only " + routable + " of " + invKey + " is free to move; the rest is reserved"
-                          + " for an active build or a capability install.";
-                return false;
-            }
+            message = WithdrawRefusal(node, invKey, amount, routable, now);
+            if (message != null) return false;
 
             MyInventory inv = target.GetInventory(0);
             if (inv == null) { message = "That target has no inventory."; return false; }
@@ -305,21 +303,7 @@ namespace Factions
         private bool Deposit(SpatialNode node, MyEntity target, string invKey, MyDefinitionId defId,
                              long amount, out long moved, out string message)
         {
-            moved = 0;
-            long remaining = amount;
-            for (int i = 0; i < target.InventoryCount && remaining > 0; i++)
-            {
-                MyInventory inv = target.GetInventory(i);
-                if (inv == null) continue;
-                long whole = (long)inv.GetItemAmount(defId);
-                long take = remaining < whole ? remaining : whole;
-                if (take <= 0) continue;
-
-                long removed = (long)inv.RemoveItemsOfType((MyFixedPoint)(double)take, defId);
-                if (removed <= 0) continue;
-                moved += removed;
-                remaining -= removed;
-            }
+            moved = RemoveFrom(target, defId, amount);
 
             // As on the withdraw side: a target holding none of it is this leg's answer, not the
             // run's, and the next container may be the one carrying the goods.
@@ -334,6 +318,140 @@ namespace Factions
                 ? "Stored " + moved + " of " + amount + "; that was all there was."
                 : "Stored " + moved + " " + invKey + " at " + node.DisplayName + ".";
             return true;
+        }
+
+        // ---- A player on a Nexus agent ---------------------------------------------------------
+
+        /// <summary>Authority: the request of a player connected to an agent, whose block is on that
+        /// agent. A withdrawal is taken off the node here and now, so two requests in flight can
+        /// never take the same units; the agent places what fits and reports the rest back as a
+        /// <see cref="NexusStoreEventKind.Stock"/> credit. A deposit is credited only when the agent
+        /// reports what it removed. The agent answers the client itself, once it has moved the goods.</summary>
+        private void QueueRemote(ulong steamId, SpatialNode node, bool deposit, string invKey, long amount, long targetEntityId)
+        {
+            Vector3D standing;
+            byte home;
+            Action<byte, NexusStockMove> queue = QueueRemoteMove;
+            if (queue == null || !LinkedViewers.TryRemotePosition(steamId, out standing, out home) || home == 0)
+            {
+                Refuse(steamId, node, deposit, invKey, amount, "Could not reach the server you are connected to.");
+                return;
+            }
+
+            long taken = 0;
+            if (!deposit)
+            {
+                DateTime now = _runtime.World != null ? _runtime.World.UtcNow : DateTime.UtcNow;
+                long routable = NodeTransfer.Withdrawable(node, invKey, now);
+                string refusal = WithdrawRefusal(node, invKey, amount, routable, now);
+                if (refusal != null) { Refuse(steamId, node, deposit, invKey, amount, refusal); return; }
+                taken = NodeTransfer.TakeFromNode(node, invKey, amount, now);
+                if (taken <= 0) { Refuse(steamId, node, deposit, invKey, amount, node.DisplayName + " holds no " + invKey + "."); return; }
+            }
+
+            queue(home, new NexusStockMove
+            {
+                Steam = steamId,
+                Node = node.Id,
+                NodeName = node.DisplayName,
+                Owner = node.OwnerFactionTag,
+                Key = invKey,
+                Amount = deposit ? amount : taken,
+                Asked = amount,
+                Deposit = deposit,
+                Target = targetEntityId,
+            });
+            Trace(node, deposit, invKey, amount, taken, true);
+        }
+
+        /// <summary>Why a withdrawal of <paramref name="amount"/> cannot be made; null when it can.</summary>
+        private static string WithdrawRefusal(SpatialNode node, string invKey, long amount, long routable, DateTime now)
+        {
+            if (routable <= 0)
+            {
+                long reserved = NodeTransfer.Reserved(node, invKey, now);
+                return reserved > 0
+                    ? "All " + reserved + " of " + invKey + " here is reserved for an active build or a capability install."
+                    : node.DisplayName + " holds no " + invKey + ".";
+            }
+            if (amount > routable)
+                return "Only " + routable + " of " + invKey + " is free to move; the rest is reserved"
+                       + " for an active build or a capability install.";
+            return null;
+        }
+
+        /// <summary>Agent: carries one stock move between the node and the block it names.
+        /// <paramref name="credit"/> is what goes back to the node's stock: a deposit's removed units,
+        /// or the withdrawn units that did not land. <paramref name="node"/> is the snapshot's, for
+        /// its position and owner; nothing here touches its stock.</summary>
+        internal static bool ApplyMove(NexusStockMove move, SpatialNode node, DefinitionIdResolver resolve,
+                                       out long moved, out long credit, out string message)
+        {
+            moved = 0;
+            credit = move.Deposit ? 0 : move.Amount;
+            MyDefinitionId defId;
+            if (resolve == null || !resolve(move.Key, out defId))
+            {
+                message = "This server has no item definition for " + move.Key + ".";
+                return false;
+            }
+            MyEntity target;
+            string refusal;
+            if (!TryResolveTarget(move.Target, node, out target, out refusal))
+            {
+                message = refusal;
+                return false;
+            }
+
+            if (!move.Deposit)
+            {
+                MyInventory inv = target.GetInventory(0);
+                if (inv == null) { message = "That target has no inventory."; return false; }
+                long room = (long)inv.ComputeAmountThatFits(defId);
+                long toMove = move.Amount < room ? move.Amount : room;
+                if (toMove <= 0) { message = "That inventory is full."; return true; }
+                var builder = (MyObjectBuilder_PhysicalObject)MyObjectBuilderSerializer.CreateNewObject(defId);
+                if (!inv.AddItems((MyFixedPoint)(double)toMove, builder))
+                {
+                    message = "That inventory would not take the items.";
+                    return true;
+                }
+                moved = toMove;
+                credit = move.Amount - toMove;
+                message = moved < move.Amount
+                    ? "Moved " + moved + " of " + move.Amount + "; the inventory filled up."
+                    : "Moved " + moved + " " + move.Key + ".";
+                return true;
+            }
+
+            moved = RemoveFrom(target, defId, move.Amount);
+            credit = moved;
+            if (moved <= 0) { message = "There is no " + move.Key + " in that inventory."; return true; }
+            message = moved < move.Asked
+                ? "Stored " + moved + " of " + move.Asked + "; that was all there was."
+                : "Stored " + moved + " " + move.Key + " at " + (move.NodeName ?? move.Node) + ".";
+            return true;
+        }
+
+        /// <summary>Whole units of <paramref name="defId"/> removed from every inventory the block
+        /// has, up to <paramref name="amount"/>.</summary>
+        private static long RemoveFrom(MyEntity target, MyDefinitionId defId, long amount)
+        {
+            long moved = 0;
+            long remaining = amount;
+            for (int i = 0; i < target.InventoryCount && remaining > 0; i++)
+            {
+                MyInventory inv = target.GetInventory(i);
+                if (inv == null) continue;
+                long whole = (long)inv.GetItemAmount(defId);
+                long take = remaining < whole ? remaining : whole;
+                if (take <= 0) continue;
+                long removed = (long)inv.RemoveItemsOfType((MyFixedPoint)(double)take, defId);
+                if (removed <= 0) continue;
+                moved += removed;
+                remaining -= removed;
+            }
+            return moved;
         }
 
         // ---- Authorisation ---------------------------------------------------------------------
@@ -356,14 +474,33 @@ namespace Factions
                 return false;
             }
 
+            // A player connected here stands where their character is; one connected to a Nexus
+            // agent stands where that agent last reported them, and resolves to this server's
+            // identity for their Steam id.
             MyPlayer player = PlayerFor(steamId);
-            if (player == null || player.Identity == null)
+            Vector3D standing = Vector3D.Zero;
+            bool standingKnown;
+            long identityId;
+            if (player != null && player.Identity != null)
             {
-                refusal = "Could not identify you on this server.";
-                return false;
+                identityId = player.Identity.IdentityId;
+                IMyCharacter character = player.Character;
+                standingKnown = character != null;
+                if (standingKnown) standing = character.PositionComp.GetPosition();
+            }
+            else
+            {
+                byte home;
+                identityId = LinkedViewers.IdentityFor(steamId);
+                if (identityId == 0L || !LinkedViewers.TryRemotePosition(steamId, out standing, out home))
+                {
+                    refusal = "Could not identify you on this server.";
+                    return false;
+                }
+                standingKnown = true;
             }
 
-            MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(player.Identity.IdentityId);
+            MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(identityId);
             FactionState owner = seFaction != null ? _runtime.FindFaction(seFaction.Tag) : null;
             if (owner == null || !owner.IsPlayerFaction)
             {
@@ -383,8 +520,7 @@ namespace Factions
                 return false;
             }
 
-            IMyCharacter character = player.Character;
-            if (character == null || !WithinReach(character.PositionComp.GetPosition(), node))
+            if (!standingKnown || !WithinReach(standing, node))
             {
                 refusal = "Move within " + (int)SearchRadiusKm + " km of the station to move its stock.";
                 return false;
@@ -446,7 +582,7 @@ namespace Factions
         /// <para>A block rather than a grid, because that is the unit the store screen's own dropdown
         /// hands out and the unit SE's store protocol carries. The grid behind it is what carries the
         /// ownership.</para></summary>
-        private bool TryResolveTarget(long entityId, SpatialNode node, out MyEntity target, out string refusal)
+        private static bool TryResolveTarget(long entityId, SpatialNode node, out MyEntity target, out string refusal)
         {
             target = null;
             refusal = null;

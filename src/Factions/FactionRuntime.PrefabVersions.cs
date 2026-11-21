@@ -210,16 +210,8 @@ namespace Factions
         /// station, that node stands as the scanned design from now on, with no bill: the blocks
         /// that differ were welded there by hand (see <see cref="StationFounder.AdoptStandingDesign"/>).
         /// Returns the reply line, or null when the scan was of anything else.</summary>
-        private string AdoptScannedStation(FactionState owner, List<Sandbox.Game.Entities.MyCubeGrid> grids, string prefabId)
+        private string AdoptScannedStation(FactionState owner, string nodeId, string prefabId)
         {
-            if (_stationMaterializer == null || grids == null) return null;
-            string nodeId = null;
-            foreach (Sandbox.Game.Entities.MyCubeGrid grid in grids)
-            {
-                if (grid == null) continue;
-                nodeId = _stationMaterializer.NodeIdForStationGrid(grid.EntityId);
-                if (nodeId != null) break;
-            }
             SpatialNode node;
             if (nodeId == null || !_world.Graph.Nodes.TryGetValue(nodeId, out node)
                 || !string.Equals(node.OwnerFactionTag, owner.Tag, StringComparison.OrdinalIgnoreCase))

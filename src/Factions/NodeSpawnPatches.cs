@@ -31,7 +31,7 @@ namespace Factions
             __state = 0;
             long stationId;
             if (!NodeSpawnSentinel.TryDecode(respawnEntityId, out stationId)) return true;
-            if (SimulationGate.Deferred || newIdentity) return true;
+            if ((SimulationGate.Deferred && !NodeSpawnManager.OnAgent) || newIdentity) return true;
 
             NodeSpawnManager manager = NodeSpawnManager.Instance;
             MyPlayer player = Sync.Players != null ? Sync.Players.GetPlayerById(playerId) : null;

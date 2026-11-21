@@ -18,6 +18,30 @@ namespace Factions.Commands
         // "At a station" threshold, matching PlayerPresenceManager.PresenceRadiusKm.
         internal const double NearbyRadiusKm = 5.0;
 
+        /// <summary>Who ran the command: the player connected here, or one connected to a Nexus agent
+        /// whose command was forwarded (<see cref="RemoteCommandContext"/>). Null for the console and
+        /// the file bridge.</summary>
+        internal static CommandCaller Caller(CommandContext context)
+        {
+            var remote = context as RemoteCommandContext;
+            if (remote != null) return remote.Caller;
+            IMyPlayer player = context.Player;
+            if (player == null) return null;
+            var caller = new CommandCaller
+            {
+                SteamId = player.SteamUserId,
+                IdentityId = player.IdentityId,
+                Promote = MySession.Static != null ? MySession.Static.GetUserPromoteLevel(player.SteamUserId) : MyPromoteLevel.None,
+            };
+            IMyCharacter ch = player.Character;
+            if (ch != null)
+            {
+                caller.HasPosition = true;
+                caller.PositionM = ch.PositionComp.GetPosition();
+            }
+            return caller;
+        }
+
         /// <summary>True when the caller is a server admin. <c>[Permission]</c> gates a whole
         /// command, but `develop` is one command carrying both a player form and an admin form, so
         /// the admin form has to check the promote level itself. False without a player — a console
@@ -25,9 +49,15 @@ namespace Factions.Commands
         /// instead, which never goes through Torch's permission check at all.</summary>
         internal static bool IsAdmin(CommandContext context)
         {
-            IMyPlayer player = context.Player;
-            if (player == null) return false;
-            return MySession.Static.GetUserPromoteLevel(player.SteamUserId) >= MyPromoteLevel.Admin;
+            CommandCaller caller = Caller(context);
+            return caller != null && caller.Promote >= MyPromoteLevel.Admin;
+        }
+
+        /// <summary>The caller's identity on this server; 0 for the console and the file bridge.</summary>
+        internal static long CallerIdentity(CommandContext context)
+        {
+            CommandCaller caller = Caller(context);
+            return caller != null ? caller.IdentityId : 0L;
         }
 
         /// <summary>True, having told the caller why, when they may not spend <paramref name="owner"/>'s
@@ -37,8 +67,7 @@ namespace Factions.Commands
         /// any member.</summary>
         internal static bool RefuseSpend(CommandContext context, FactionState owner)
         {
-            IMyPlayer player = context.Player;
-            string refusal = PlayerAuthority.SpendRefusal(player != null ? player.IdentityId : 0L, owner.Tag);
+            string refusal = PlayerAuthority.SpendRefusal(CallerIdentity(context), owner.Tag);
             if (refusal == null) return false;
             context.Respond(refusal);
             return true;
@@ -53,10 +82,10 @@ namespace Factions.Commands
             FactionRuntime runtime = plugin != null ? plugin.Runtime : null;
             if (runtime == null) { error = "Factions plugin not ready."; return false; }
 
-            IMyPlayer player = context.Player;
-            if (player == null) { error = "Run this in-game, not from the server console."; return false; }
+            CommandCaller caller = Caller(context);
+            if (caller == null) { error = "Run this in-game, not from the server console."; return false; }
 
-            MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(player.IdentityId);
+            MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(caller.IdentityId);
             if (seFaction == null) { error = "You are not in a faction."; return false; }
 
             owner = runtime.FindFaction(seFaction.Tag);
@@ -87,10 +116,10 @@ namespace Factions.Commands
             FactionRuntime runtime = plugin != null ? plugin.Runtime : null;
             if (runtime == null) { error = "Factions plugin not ready."; return false; }
 
-            IMyPlayer player = context.Player;
-            if (player == null) { error = "Run this in-game, not from the server console."; return false; }
+            CommandCaller caller = Caller(context);
+            if (caller == null) { error = "Run this in-game, not from the server console."; return false; }
 
-            seFaction = MySession.Static.Factions.GetPlayerFaction(player.IdentityId);
+            seFaction = MySession.Static.Factions.GetPlayerFaction(caller.IdentityId);
             if (seFaction == null) { error = "You are not in a faction."; return false; }
 
             owner = runtime.FindFaction(seFaction.Tag);
@@ -106,15 +135,15 @@ namespace Factions.Commands
         }
 
         /// <summary>The caller's own position in the km-scale coordinates the world model uses.</summary>
-        internal static bool TryResolvePositionKm(IMyPlayer player, out Vec3 posKm, out string error)
+        internal static bool TryResolvePositionKm(CommandContext context, out Vec3 posKm, out string error)
         {
             posKm = new Vec3(0, 0, 0);
             error = null;
 
-            IMyCharacter ch = player != null ? player.Character : null;
-            if (ch == null) { error = "Can't find your in-world position."; return false; }
+            CommandCaller caller = Caller(context);
+            if (caller == null || !caller.HasPosition) { error = "Can't find your in-world position."; return false; }
 
-            Vector3D worldPos = ch.PositionComp.GetPosition();
+            Vector3D worldPos = caller.PositionM;
             posKm = new Vec3(worldPos.X / 1000.0, worldPos.Y / 1000.0, worldPos.Z / 1000.0);
             return true;
         }
@@ -123,20 +152,20 @@ namespace Factions.Commands
         // straight-line distance against SpatialNode.Position) and its PresenceRadiusKm threshold,
         // just against IMyCharacter (CommandContext.Player is IMyPlayer, not the concrete MyPlayer
         // the presence scan iterates) instead of re-scanning every online player.
-        internal static bool TryResolveNearestOwnedNode(IMyPlayer player, IEnumerable<SpatialNode> candidates,
+        internal static bool TryResolveNearestOwnedNode(CommandContext context, IEnumerable<SpatialNode> candidates,
             out SpatialNode nearest, out string error)
         {
             nearest = null;
             error = null;
 
-            IMyCharacter ch = player != null ? player.Character : null;
-            if (ch == null)
+            CommandCaller caller = Caller(context);
+            if (caller == null || !caller.HasPosition)
             {
                 error = "Can't find your in-world position — specify a nodeId explicitly.";
                 return false;
             }
 
-            Vector3D worldPos = ch.PositionComp.GetPosition();
+            Vector3D worldPos = caller.PositionM;
             double px = worldPos.X / 1000.0, py = worldPos.Y / 1000.0, pz = worldPos.Z / 1000.0;
 
             double bestDist = double.MaxValue;

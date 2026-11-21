@@ -22,6 +22,10 @@ namespace Factions
     /// <para><b>Scope:</b> stations on a node Factions tracks whose owner is a registered NPC
     /// faction. A player faction's station, an unregistered owner and a station Factions does not
     /// know are served as vanilla serves them.</para>
+    ///
+    /// <para>On a Nexus agent the faction states are the authority's, so the authority judges every
+    /// registered pair into the snapshot and the agent reads the owner's row
+    /// (<see cref="StoreAccess.DecideRelayed"/>).</para>
     /// </summary>
     internal static class StoreRefusal
     {
@@ -66,7 +70,8 @@ namespace Factions
         /// judges, and on a refusal traces it and tells the player. True means refuse.</summary>
         internal static bool RefusesAtStation(long stationId, long identityId, ulong steamId, string surface)
         {
-            if (SimulationGate.Deferred || stationId == 0 || identityId == 0) return false;
+            if (stationId == 0 || identityId == 0) return false;
+            if (SimulationGate.Deferred) return RefusesOnAgent(stationId, identityId, steamId, surface);
             FactionsPlugin plugin = FactionsPlugin.Instance;
             if (plugin == null || !plugin.IsFactionsStation(stationId)) return false;
             FactionRuntime runtime = plugin.Runtime;
@@ -79,8 +84,51 @@ namespace Factions
             if (!d.Refused) return false;
 
             Trace(surface, node, identityId, d);
-            Notify(plugin, runtime, identityId, steamId, node.OwnerFactionTag, d.Message);
+            Notify(plugin, runtime.Tuning, identityId, steamId, node.OwnerFactionTag, d.Message);
             return true;
+        }
+
+        /// <summary>The same judgement on a Nexus agent, from the owner's row of the authority's
+        /// snapshot (<see cref="StoreAccess.DecideRelayed"/>). A customer's faction counts as
+        /// registered when the snapshot has it; their personal band is read from this server's SE,
+        /// which Nexus keeps in step with the authority's.</summary>
+        private static bool RefusesOnAgent(long stationId, long identityId, ulong steamId, string surface)
+        {
+            FactionsPlugin plugin = FactionsPlugin.Instance;
+            NexusSnapshotFaction owner;
+            if (plugin == null || !plugin.IsFactionsStation(stationId) || !plugin.TryAgentStationOwner(stationId, out owner))
+                return false;
+            StoreAccessDecision d = JudgeOnAgent(plugin, owner, identityId);
+            if (!d.Refused) return false;
+            if (DebugTraces.StoreBar)
+                Log.Info("STORE_REFUSED surface=" + surface + " station=" + stationId + " owner=" + owner.Tag
+                       + " identity=" + identityId + " cause=" + d.Cause);
+            Notify(plugin, plugin.Tuning, identityId, steamId, owner.Tag, d.Message);
+            return true;
+        }
+
+        /// <summary>The agent's judgement of one customer at a station whose owner's snapshot row is
+        /// <paramref name="owner"/>. Served when the owner is a player faction or unregistered.</summary>
+        internal static StoreAccessDecision JudgeOnAgent(FactionsPlugin plugin, NexusSnapshotFaction owner, long identityId)
+        {
+            if (plugin == null || owner == null || owner.Player || identityId == 0
+                || MySession.Static == null || MySession.Static.Factions == null)
+                return StoreAccessDecision.Served;
+
+            MyFaction seFaction = MySession.Static.Factions.GetPlayerFaction(identityId);
+            string customerTag = seFaction != null && plugin.IsAgentRegistryFaction(seFaction.Tag) ? seFaction.Tag : null;
+            string personalBand = null;
+            if (customerTag == null)
+            {
+                MyFaction ownerSe = MySession.Static.Factions.TryGetFactionByTag(owner.Tag);
+                if (ownerSe != null)
+                {
+                    Tuple<MyRelationsBetweenFactions, int> rel =
+                        MySession.Static.Factions.GetRelationBetweenPlayerAndFaction(identityId, ownerSe.FactionId);
+                    if (rel != null) personalBand = rel.Item1.ToString();
+                }
+            }
+            return StoreAccess.DecideRelayed(owner, customerTag, personalBand);
         }
 
         /// <summary>STORE_REFUSED, behind <c>factions debug storebar</c>.</summary>
@@ -91,12 +139,12 @@ namespace Factions
                    + " identity=" + identityId + " cause=" + d.Cause);
         }
 
-        private static void Notify(FactionsPlugin plugin, FactionRuntime runtime, long identityId, ulong steamId,
+        private static void Notify(FactionsPlugin plugin, FactionTuning tuning, long identityId, ulong steamId,
                                    string ownerTag, string message)
         {
             try
             {
-                double cooldown = runtime.Tuning != null ? runtime.Tuning.StoreRefusalNoticeCooldownSeconds : 30.0;
+                double cooldown = tuning != null ? tuning.StoreRefusalNoticeCooldownSeconds : 30.0;
                 if (!Throttle.ShouldNotify(identityId, ownerTag, DateTime.UtcNow, cooldown)) return;
                 if (steamId == 0 && MySession.Static != null && MySession.Static.Players != null)
                     steamId = MySession.Static.Players.TryGetSteamId(identityId);

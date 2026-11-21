@@ -18,9 +18,13 @@ When you are at a site that nobody owns, Factions may offer it to your faction i
 
 > *Our scouts report an unclaimed (ore) site (N123). Claim it for [TAG]? Reply yes or no.*
 
-Type `yes` in chat to take it, or `no` to leave it. Any member of the faction who receives the offer
-can accept it. If you are not in a faction, you are told the site is free and that you need a
-faction to claim it.
+Type `yes` in chat to take it, or `no` to leave it. Only a leader of your faction can answer. If no
+leader is online, the member who receives the offer is told that a leader must answer it, and the
+offer goes to the first leader who comes online. If you are not in a faction, you are told the site
+is free and that you need a faction to claim it.
+
+If your faction has more than one offer open, a plain `yes` answers none of them. You are told which
+sites are on offer, and you answer one at a time by naming it, for example `yes N123` or `no N123`.
 
 Sites become unclaimed when their owner loses them. An abandoned site stays claimable for several
 hours before it disappears.

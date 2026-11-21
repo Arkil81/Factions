@@ -19,8 +19,9 @@ namespace Factions.Core
         public double Block;
         /// <summary>Whether the station had no working power producer at the flush.</summary>
         public bool PoweredDown;
-        /// <summary>The attacker's reply to an offer (<see cref="NexusNotice.Offer"/>); no damage and
-        /// no node. Numbered with the fire so it is applied once and in order.</summary>
+        /// <summary>The attacker's reply to an offer (<see cref="NexusNotice.Offer"/>); no damage. Its
+        /// <see cref="Node"/> is the node the reply named (<c>yes N123</c>), or null. Numbered with the
+        /// fire so it is applied once and in order.</summary>
         public NexusAnswer Answer;
     }
 
@@ -66,6 +67,9 @@ namespace Factions.Core
         public bool Offer;
         /// <summary>Who the chat line is from; null for "Factions".</summary>
         public string Author;
+        /// <summary>A <see cref="CombatTone"/> plus one: the text also goes on the player's FactionsUI
+        /// HUD as a combat notice in that tone. Zero for none.</summary>
+        public int Combat;
     }
 
     /// <summary>

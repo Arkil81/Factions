@@ -87,6 +87,28 @@ namespace Factions
         public bool RegisterDesign(long entityId, string fingerprint, MyObjectBuilder_CubeGrid[] grids, string gridName,
                                    long registeredByIdentityId, DateTime nowUtc)
         {
+            if (!KeepDesign(entityId, fingerprint, grids, gridName, registeredByIdentityId, nowUtc)) return false;
+            try
+            {
+                Directory.CreateDirectory(DesignDir);
+                string name = DesignFileStem(entityId);
+                MyPrefabManager.SavePrefabToPath(name, Path.Combine(DesignDir, name + ".sbc"),
+                                                 new List<MyObjectBuilder_CubeGrid>(grids));
+                WriteDesignManifest();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "CustomPrefabStore: failed to persist the design of grid " + entityId + " (usable until restart).");
+                return false;
+            }
+        }
+
+        /// <summary>As <see cref="RegisterDesign"/>, in memory only: a Nexus agent's copy of a design
+        /// the authority writes, usable here until its next reload of the store brings the written one.</summary>
+        public bool KeepDesign(long entityId, string fingerprint, MyObjectBuilder_CubeGrid[] grids, string gridName,
+                               long registeredByIdentityId, DateTime nowUtc)
+        {
             if (entityId == 0 || grids == null || grids.Length == 0 || grids[0] == null) return false;
             int blocks = 0;
             foreach (MyObjectBuilder_CubeGrid g in grids)
@@ -103,21 +125,7 @@ namespace Factions
             };
             _designs[entityId] = record;
             _designGrids[entityId] = grids;
-
-            try
-            {
-                Directory.CreateDirectory(DesignDir);
-                string name = DesignFileStem(entityId);
-                MyPrefabManager.SavePrefabToPath(name, Path.Combine(DesignDir, name + ".sbc"),
-                                                 new List<MyObjectBuilder_CubeGrid>(grids));
-                WriteDesignManifest();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log.Warn(ex, "CustomPrefabStore: failed to persist the design of grid " + entityId + " (usable until restart).");
-                return false;
-            }
+            return true;
         }
 
         /// <summary>The prefab a Factions store sold as grid <paramref name="entityId"/>.</summary>

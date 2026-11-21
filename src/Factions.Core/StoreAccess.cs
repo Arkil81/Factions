@@ -53,12 +53,7 @@ namespace Factions.Core
         {
             if (owner == null || string.IsNullOrEmpty(owner.Tag)) return StoreAccessDecision.Served;
 
-            if (customerFaction == null)
-            {
-                if (!string.Equals(personalBand, EnemiesBand, StringComparison.OrdinalIgnoreCase))
-                    return StoreAccessDecision.Served;
-                return Refuse(owner.Tag + " will not trade with you", "personal:" + EnemiesBand);
-            }
+            if (customerFaction == null) return Personal(owner.Tag, personalBand);
 
             if (string.Equals(owner.Tag, customerFaction.Tag, StringComparison.OrdinalIgnoreCase))
                 return StoreAccessDecision.Served;
@@ -77,6 +72,32 @@ namespace Factions.Core
             if (customerFaction.Embargoes.Contains(owner.Tag))
                 return Refuse(them + " has embargoed " + owner.Tag + " — trade refused", "embargo:" + them);
             return Refuse(them + " is hostile to " + owner.Tag + " — trade refused", "hostile:" + them);
+        }
+
+        /// <summary>The same rule on a Nexus agent, which holds no faction states: the owner's row of
+        /// the authority's snapshot carries the registered factions it refuses
+        /// (<see cref="NexusNodeSnapshot.FillTradeBars"/>).</summary>
+        /// <param name="owner">The station owner's snapshot row; null (unregistered) is served, as is
+        /// a player faction.</param>
+        /// <param name="customerTag">The customer's faction tag when that faction is registered, else
+        /// null.</param>
+        public static StoreAccessDecision DecideRelayed(NexusSnapshotFaction owner, string customerTag, string personalBand)
+        {
+            if (owner == null || owner.Player || string.IsNullOrEmpty(owner.Tag)) return StoreAccessDecision.Served;
+            if (customerTag == null) return Personal(owner.Tag, personalBand);
+            if (string.Equals(owner.Tag, customerTag, StringComparison.OrdinalIgnoreCase)) return StoreAccessDecision.Served;
+            if (owner.Bars != null)
+                foreach (NexusTradeBar bar in owner.Bars)
+                    if (bar != null && string.Equals(bar.Tag, customerTag, StringComparison.OrdinalIgnoreCase))
+                        return Refuse(bar.Message, bar.Cause);
+            return StoreAccessDecision.Served;
+        }
+
+        private static StoreAccessDecision Personal(string ownerTag, string personalBand)
+        {
+            if (!string.Equals(personalBand, EnemiesBand, StringComparison.OrdinalIgnoreCase))
+                return StoreAccessDecision.Served;
+            return Refuse(ownerTag + " will not trade with you", "personal:" + EnemiesBand);
         }
 
         private static StoreAccessDecision Refuse(string message, string cause)

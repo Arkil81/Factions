@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Factions.Core;
 using HarmonyLib;
@@ -53,6 +54,15 @@ namespace Factions
     /// Neutral while the war stands. The peace branch below stays for callers that bypass the
     /// request gate. A change raised by <see cref="VanillaDiplomacyBroadcast"/> is recognised and
     /// skipped (FAC-394 slice 5).</para>
+    ///
+    /// <para><b>On a Nexus agent</b> this method runs for every in-scope change: one pressed there,
+    /// and every change Nexus replays from another server, the authority's own broadcasts included.
+    /// Vanilla's member loop would overwrite the members' reputations here, and Nexus relays each of
+    /// those writes back to the authority. So the agent skips vanilla for an in-scope pair and writes
+    /// the one relation entry itself, straight into the table, which Nexus does not relay. An entry
+    /// already in the requested band is kept: the authority's projected value reaches the agent
+    /// through Nexus's own faction-reputation sync. Routing into <c>Diplomacy</c> is the authority's,
+    /// which runs this method again for the replayed change.</para>
     /// </summary>
     [HarmonyPatch(typeof(MyFactionCollection), "ChangeFactionRelation")]  // private; string required
     internal static class FactionDiplomacyPatch
@@ -107,6 +117,53 @@ namespace Factions
             MySession.Static.Factions.SetReputationBetweenFactions(toFactionId, fromFactionId, rep);
         }
 
+        private static readonly AccessTools.FieldRef<MyFactionCollection,
+            Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>>> RelationTable =
+            TryRelationTable();
+
+        private static AccessTools.FieldRef<MyFactionCollection,
+            Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>>> TryRelationTable()
+        {
+            try
+            {
+                return AccessTools.FieldRefAccess<MyFactionCollection,
+                    Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>>>("m_relationsBetweenFactions");
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "MyFactionCollection.m_relationsBetweenFactions did not resolve. On a Nexus agent the "
+                            + "vanilla diplomacy buttons overwrite every member's reputation toward the other faction.");
+                return null;
+            }
+        }
+
+        /// <summary>Agent: an in-scope change applied without the member loop. False when out of scope,
+        /// or when the snapshot has not arrived, so vanilla runs.</summary>
+        private static bool ApplyOnAgent(MyFactionCollection factions, long fromFactionId, long toFactionId,
+                                         MyRelationsBetweenFactions relation)
+        {
+            FactionsPlugin plugin = FactionsPlugin.Instance;
+            if (plugin == null || factions == null || RelationTable == null) return false;
+            VRage.Game.ModAPI.IMyFaction seFrom = factions.TryGetFactionById(fromFactionId);
+            VRage.Game.ModAPI.IMyFaction seTo = factions.TryGetFactionById(toFactionId);
+            if (seFrom == null || seTo == null) return false;
+
+            NexusSnapshotFaction a = plugin.AgentFactionRow(seFrom.Tag);
+            NexusSnapshotFaction b = plugin.AgentFactionRow(seTo.Tag);
+            bool fromNpc = a != null && !a.Player, toNpc = b != null && !b.Player;
+            if (!((IsPlayerMade(seFrom) && toNpc) || (IsPlayerMade(seTo) && fromNpc))) return false;
+
+            var key = new MyFactionCollection.MyRelatablePair(fromFactionId, toFactionId);
+            Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>> table = RelationTable(factions);
+            Tuple<MyRelationsBetweenFactions, int> current;
+            bool kept = table.TryGetValue(key, out current) && current != null && current.Item1 == relation;
+            if (!kept) table[key] = new Tuple<MyRelationsBetweenFactions, int>(relation, factions.TranslateRelationToReputation(relation));
+            if (DebugTraces.Diplomacy)
+                Log.Info("DIPLOMACY_RELATION_SET from=" + seFrom.Tag + " to=" + seTo.Tag + " relation=" + relation
+                         + " entry=" + (kept ? "kept" : "written") + " agent=yes");
+            return true;
+        }
+
         private static string TagOf(long factionId)
         {
             VRage.Game.ModAPI.IMyFaction f = MySession.Static?.Factions?.TryGetFactionById(factionId);
@@ -128,7 +185,8 @@ namespace Factions
         /// <summary>Returns false to skip the vanilla body — including its member-reputation loop —
         /// for an in-scope pair only.</summary>
         [HarmonyPrefix]
-        private static bool Prefix(long fromFactionId, long toFactionId, MyRelationsBetweenFactions relation)
+        private static bool Prefix(MyFactionCollection __instance, long fromFactionId, long toFactionId,
+                                   MyRelationsBetweenFactions relation)
         {
             try
             {
@@ -143,7 +201,7 @@ namespace Factions
                             + " relation=" + relation);
                     return false;
                 }
-                if (SimulationGate.Deferred) return true;
+                if (SimulationGate.Deferred) return !ApplyOnAgent(__instance, fromFactionId, toFactionId, relation);
 
                 FactionRuntime runtime = FactionsPlugin.Instance?.Runtime;
                 FactionTuning tuning = runtime?.World?.Tuning;

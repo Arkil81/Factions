@@ -18,6 +18,12 @@ namespace Factions
     /// covers an authority restart and any write-off whose order was lost. A grid left in this
     /// server's own save from an earlier process is closed on the first frame. Either way a grid a
     /// player owns is kept: it was captured, and the authority's reaper would leave it too.</para>
+    ///
+    /// <para><b>Across a sector boundary</b> (<see cref="SectorHandover"/>). A grid Nexus carried out of
+    /// this server's sector is reported as handed off, and the authority holds it for the server that
+    /// receives it. A fleet grid Nexus carried in is held at once, unflown, and reported under the key
+    /// its name carries; the authority answers with an adopt order and its leg. One the authority does
+    /// not take within <see cref="UnheldGrace"/> is let go, to the reaper, rather than closed.</para>
     /// </summary>
     internal sealed class AgentFleets
     {
@@ -47,6 +53,8 @@ namespace Factions
             public bool Launching, Approaching, Escorting, Escorted;
             public Vec3 EscortTargetKm;
             public int ThrustLost, GaveUp;
+            /// <summary>Carried in by Nexus and not yet adopted: held, reported, not flown.</summary>
+            public bool Arrived;
         }
 
         private sealed class Spawning
@@ -61,6 +69,8 @@ namespace Factions
         private readonly Dictionary<string, Spawning> _spawning = new Dictionary<string, Spawning>(StringComparer.Ordinal);
         private readonly Dictionary<string, DateTime> _failed = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         private readonly Dictionary<long, DateTime> _closed = new Dictionary<long, DateTime>();
+        private readonly Dictionary<long, DateTime> _handedOff = new Dictionary<long, DateTime>();
+        private readonly List<long> _arrivals = new List<long>();
         private readonly List<long> _scratch = new List<long>();
         private readonly List<string> _keys = new List<string>();
         private bool _swept;
@@ -215,6 +225,16 @@ namespace Factions
                     h.InWing = h.Winged = false;
                     _spawner.EndWing(o.Eid, h.TargetKm);
                     return;
+                case NexusFleetOp.Adopt:
+                    if (!_grids.TryGetValue(o.Eid, out h)) return;
+                    if (o.Key != null) h.Key = o.Key;
+                    if (o.Tag != null) h.Tag = o.Tag;
+                    h.Kind = (ActionKind)o.Kind;
+                    h.MunitionsId = o.MunitionsId;
+                    h.Arrived = false;
+                    bool adopted = _spawner.AdoptArrival(o.Eid, h.Key, h.Tag, h.Kind, o.Prefab, o.MunitionsId, null);
+                    Log.Info("NEXUS_FLEET_ADOPTED key=" + h.Key + " eid=" + o.Eid + " kind=" + h.Kind + " ok=" + adopted);
+                    return;
             }
         }
 
@@ -251,7 +271,9 @@ namespace Factions
             if (!_swept) { _swept = true; SweepLeftovers(); }
             _spawner.TickFlight();
             TickSpawns(nowUtc);
+            TakeArrivals(nowUtc);
 
+            SweepGone(nowUtc);
             _scratch.Clear();
             foreach (Held g in _grids.Values)
             {
@@ -259,12 +281,15 @@ namespace Factions
                 if (g.UnheldSince != DateTime.MinValue && nowUtc - g.UnheldSince >= UnheldGrace
                     && nowUtc - g.BornUtc >= UnheldGrace)
                 {
-                    // Taken by a player: theirs to keep, as the authority's reaper leaves it.
+                    // Taken by a player: theirs to keep, as the authority's reaper leaves it. One that
+                    // arrived and was never taken is not ours to close either.
                     bool taken = IsPlayerOwned(g.Eid);
-                    _scratch.Add(taken ? g.Eid : -g.Eid);
+                    _scratch.Add(taken || g.Arrived ? g.Eid : -g.Eid);
                     if (taken) Log.Info("NEXUS_FLEET_UNHELD eid=" + g.Eid + " kept=player");
+                    else if (g.Arrived) Log.Info("NEXUS_FLEET_UNHELD eid=" + g.Eid + " kept=unclaimed");
                     continue;
                 }
+                if (g.Arrived) continue;
                 NexusFleetAsk a = g.Ask;
                 g.Launching = a != null && a.Launch
                               && _spawner.BeginLaunch(g.Eid, new Vec3(a.Lx, a.Ly, a.Lz), a.Through);
@@ -326,13 +351,64 @@ namespace Factions
             }
             foreach (long id in _scratch)
             {
-                if (id > 0) { _grids.Remove(id); _spawner.ReleaseControl(id); _spawner.SetSaved(id, true); continue; }
+                if (id > 0) { Forget(id, nowUtc); continue; }
                 Log.Info("NEXUS_FLEET_UNHELD eid=" + (-id) + " closed");
                 Close(-id, nowUtc);
             }
             Prune(_failed, nowUtc);
             Prune(_closed, nowUtc);
+            Prune(_handedOff, nowUtc);
             TickMunitions(nowUtc);
+        }
+
+        /// <summary>Drops each held grid that left the world without an order. Run before every report
+        /// too: one missing from a report and not listed as handed off reads as lost.</summary>
+        private void SweepGone(DateTime nowUtc)
+        {
+            List<long> gone = null;
+            foreach (Held g in _grids.Values)
+                if (!_spawner.GridExists(g.Eid)) (gone ?? (gone = new List<long>())).Add(g.Eid);
+            if (gone != null) foreach (long id in gone) Forget(id, nowUtc);
+        }
+
+        /// <summary>Stops holding a grid without closing it: gone, taken by a player, or never claimed.</summary>
+        private void Forget(long id, DateTime nowUtc)
+        {
+            _grids.Remove(id);
+            _spawner.ReleaseControl(id);
+            _spawner.SetSaved(id, true);
+            byte to;
+            string key;
+            if (SectorHandover.TryTakeLeft(id, out to, out key))
+            {
+                _handedOff[id] = nowUtc;
+                Log.Info("NEXUS_FLEET_HANDED_OFF eid=" + id + " key=" + key + " to=" + to);
+            }
+        }
+
+        /// <summary>Holds each fleet hull Nexus carried in, unflown, until the authority adopts it.</summary>
+        private void TakeArrivals(DateTime nowUtc)
+        {
+            SectorHandover.TakeArrivals(_arrivals);
+            foreach (long eid in _arrivals)
+            {
+                if (_grids.ContainsKey(eid) || _closed.ContainsKey(eid)) continue;
+                MyCubeGrid grid;
+                long namedEid;
+                string key;
+                if (!MyEntities.TryGetEntityById(eid, out grid, false) || grid == null || grid.MarkedForClose
+                    || !NpcGridNaming.TryParseName(grid.Name, out namedEid, out key) || namedEid != eid) continue;
+                // A rotor-mounted turret carries the name too and travels with its hull.
+                if (WingWorld.HullOf(grid) != grid || IsPlayerOwned(eid)) continue;
+                Vec3? at = _spawner.GetGridPositionKm(eid);
+                _grids[eid] = new Held
+                {
+                    Key = key, Eid = eid, Tag = _spawner.GetGridOwnerFactionTag(eid), BornUtc = nowUtc,
+                    UnheldSince = nowUtc, Arrived = true, TargetKm = at ?? default(Vec3),
+                };
+                _spawner.SetSaved(eid, false);
+                Log.Info("NEXUS_FLEET_ARRIVED key=" + key + " eid=" + eid);
+            }
         }
 
         private void TickMunitions(DateTime nowUtc)
@@ -430,6 +506,7 @@ namespace Factions
             report.Fleets = true;
             report.OrdersThrough = _inbox.Through;
             report.ClockUtc = DateTime.UtcNow;
+            SweepGone(report.ClockUtc);
             foreach (Held g in _grids.Values)
             {
                 Vec3? p = _spawner.GetGridPositionKm(g.Eid);
@@ -491,6 +568,7 @@ namespace Factions
             }
             if (_failed.Count > 0) report.SpawnFailed = new List<string>(_failed.Keys);
             if (_closed.Count > 0) report.Closed = new List<long>(_closed.Keys);
+            if (_handedOff.Count > 0) report.HandedOff = new List<long>(_handedOff.Keys);
         }
 
         private static void Prune<T>(Dictionary<T, DateTime> d, DateTime nowUtc)

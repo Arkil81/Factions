@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Factions.Core;
 using HarmonyLib;
 using Sandbox.Game.World.Generator;
 using VRage.Game.ModAPI;
@@ -15,6 +16,8 @@ namespace Factions
     ///   <item><b>CloseObjectSeed prefix</b> — returns false (skip vanilla) for our stations,
     ///     so the cell generator never closes a grid or safe zone we're responsible for.</item>
     /// </list>
+    /// On a Nexus agent the prefix withholds every station seed until the authority's first node
+    /// snapshot has seeded the claims (<see cref="StationSeedGate"/>).
     /// "Ours" is <see cref="StationMaterializer.IsOurs"/>: a claimed id, or any station of a
     /// registry faction. The faction half covers the claim's own lag (a founding not yet resynced,
     /// a node mid-handover), which is where vanilla's saved pins came from (FAC-025).
@@ -28,7 +31,14 @@ namespace Factions
         [HarmonyPatch(nameof(MyStationCellGenerator.GenerateObjects))]
         static void GenerateObjects_Prefix(List<MyObjectSeed> list)
         {
-            if (SimulationGate.Deferred && !SimulationGate.Hands) return;
+            StationSeedPolicy policy = StationSeedGate.For(
+                SimulationGate.Deferred, SimulationGate.Hands, SimulationGate.HandsPending);
+            if (policy == StationSeedPolicy.Vanilla) return;
+            if (policy == StationSeedPolicy.WithholdAll)
+            {
+                list.RemoveAll(seed => seed.UserData is IMyFactionStation);
+                return;
+            }
             list.RemoveAll(seed =>
             {
                 var station = seed.UserData as IMyFactionStation;
