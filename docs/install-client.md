@@ -18,6 +18,12 @@ it from the [Pulsar releases page](https://github.com/SpaceGT/Pulsar/releases/la
 its installation instructions. When it is working, the Space Engineers main menu has a **Plugins**
 button.
 
+**Start the game with Pulsar's `Legacy.exe`, not `Interim.exe` or `Modern.exe`.** Pulsar comes with
+three launchers. `Legacy.exe` runs Space Engineers on .NET Framework, which is what Factions UI is
+built for. `Interim.exe` runs it on .NET 10, and Factions UI does not support that yet, so Pulsar
+hides it from the plugin list without any message. `Modern.exe` is for Space Engineers 2. Your Steam
+launch options (below) show which one you use.
+
 ### 2. The `-sources` launch option
 
 Pulsar normally only offers plugins from its own built-in list, and Factions UI is not on that list.
@@ -110,6 +116,8 @@ it for `FactionsUI:`.
 
 ## Troubleshooting
 
+- **Factions UI is not in the plugin list, and the source is right.** Check that the launch options
+  name `Legacy.exe`. Under `Interim.exe`, Pulsar leaves Factions UI out of the list.
 - **No Sources button.** The game was started without `-sources`; check the launch options and
   restart.
 - **Factions UI is not in the plugin list.** In **Sources**, click the Factions entry under
