@@ -50,6 +50,6 @@
 
   <!-- The ref Pulsar compiles for a GitHub install. Empty here; the public export
        (scripts/public-export) sets it to the release tag. Unused by a dev folder. -->
-  <Commit>v0.601.0</Commit>
+  <Commit>v0.602.0</Commit>
 
 </PluginData>

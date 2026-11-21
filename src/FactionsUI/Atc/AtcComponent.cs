@@ -16,7 +16,7 @@ namespace FactionsUI.Atc;
 /// <see cref="WireMessageKind.TrafficPilotCall"/>s (the pilots) on the radio.
 ///
 /// <para><b>Layering.</b> Each station is its own channel (<see cref="AtcChannel"/>): within it the
-/// pilot calls and the controller answers in turn. Pilot calls from different stations layer, up to
+/// pilot calls and the controller answers in turn. Pilot calls from different stations layer, at most
 /// <see cref="MaxChannels"/> channels at once; only one controller speaks at a time, and a routine
 /// controller line that comes due while another speaks is dropped. When more want the air, a hostile
 /// warning goes first, then the player's own faction's stations, then the longest waiting.</para>
@@ -41,8 +41,9 @@ namespace FactionsUI.Atc;
 [MySessionComponentDescriptor(MyUpdateOrder.NoUpdate)]
 public class AtcComponent : MySessionComponentBase
 {
-    /// <summary>Stations heard at once. Each is up to two SE voices.</summary>
-    public const int MaxChannels = 6;
+    /// <summary>Stations heard at once. Each is up to two SE voices. A station left waiting past its
+    /// staleness loses the call (<see cref="AtcChannel.PilotStaleSeconds"/>).</summary>
+    public const int MaxChannels = 2;
     private const int ChannelCap = 64;
 
     private static readonly Dictionary<string, AtcChannel> Channels = new Dictionary<string, AtcChannel>(StringComparer.Ordinal);

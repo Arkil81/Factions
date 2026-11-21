@@ -127,7 +127,7 @@ internal static class AtcRadio
         {
             if (block.Closed || !block.IsWorking) continue;
             double snr = baseSnrDb + (aim.HasSource ? GainDb(kind, block, aim, to) : 0);
-            double squelch = AtcSquelch.Get(block.EntityId);
+            double squelch = AtcSquelch.Get(block.EntityId, kind.HasValue);
             if (!any || snr - squelch > best.SnrDb - best.SquelchDb) best = new Reception(snr, squelch, 0);
             any = true;
         }
@@ -150,10 +150,10 @@ internal static class AtcRadio
         if (!d.HasValue)
         {
             double f = fallbackShare / 255.0;
-            return new Reception(LadderSnrDb(f), AtcSquelch.DefaultDb, f);
+            return new Reception(LadderSnrDb(f), AtcSquelch.NoAntennaDb, f);
         }
         double omniShare = RadioAim.Share(d.Value, aim.OmniReachKm, 0);
-        Reception best = new Reception(LadderSnrDb(omniShare), AtcSquelch.DefaultDb, omniShare);
+        Reception best = new Reception(LadderSnrDb(omniShare), AtcSquelch.NoAntennaDb, omniShare);
         if (Antennas.Count == 0) return best;
         Vector3D to = new Vector3D(aim.SourceX, aim.SourceY, aim.SourceZ) - PosKm.Value;
         bool any = false;
@@ -161,7 +161,7 @@ internal static class AtcRadio
         {
             if (block.Closed || !block.IsWorking) continue;
             double share = RadioAim.Share(d.Value, aim.OmniReachKm, GainDb(kind, block, aim, to));
-            double snr = LadderSnrDb(share), squelch = AtcSquelch.Get(block.EntityId);
+            double snr = LadderSnrDb(share), squelch = AtcSquelch.Get(block.EntityId, kind.HasValue);
             if (!any || snr - squelch > best.SnrDb - best.SquelchDb) best = new Reception(snr, squelch, share);
             any = true;
         }

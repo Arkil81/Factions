@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces.Terminal;
+using Factions.Wire;
 using VRage.FileSystem;
 using VRage.Utils;
 
@@ -21,13 +22,22 @@ namespace FactionsUI.Atc;
 /// id, in <c>Storage\FactionsUI.squelch</c> beside the plugin's settings: another player flying the
 /// same ship keeps their own. No server message, so moving the slider is heard at once.</para>
 ///
-/// <para>The slider sits in every antenna's terminal, from 0 to 40 dB; an antenna never set reads
-/// <see cref="DefaultDb"/>, the server's own squelch.</para>
+/// <para>The slider sits in every antenna's terminal, from 0 to 40 dB. An antenna never set reads
+/// its kind's default (<see cref="DefaultFor"/>): an omnidirectional antenna
+/// <see cref="OmniDefaultDb"/>, so only near, strong traffic comes through, and a reflector
+/// <see cref="ReflectorDefaultDb"/>, so a dish pulls faint calls in where it is pointed.</para>
 /// </summary>
 internal static class AtcSquelch
 {
-    /// <summary>The server's <c>AtcSquelchDb</c> default: an antenna left alone hears as before.</summary>
-    public const float DefaultDb = 3f;
+    /// <summary>The server's <c>AtcSquelchDb</c>: what a suit or a seat with no antenna hears at.</summary>
+    public const float NoAntennaDb = 3f;
+
+    /// <summary>An omnidirectional antenna never set: a pilot is heard within about 5.6 km, a
+    /// controller within half its reach.</summary>
+    public const float OmniDefaultDb = 20f;
+
+    /// <summary>A reflector never set: the server's squelch, so a dish hears as far as it points.</summary>
+    public const float ReflectorDefaultDb = NoAntennaDb;
     public const float MaxDb = 40f;
 
     private static readonly Dictionary<long, float> Thresholds = new();
@@ -38,17 +48,19 @@ internal static class AtcSquelch
 
     private static string FilePath => Path.Combine(MyFileSystem.UserDataPath, "Storage", Plugin.Name + ".squelch");
 
-    public static float Get(long antennaId)
+    public static float DefaultFor(bool reflector) => reflector ? ReflectorDefaultDb : OmniDefaultDb;
+
+    public static float Get(long antennaId, bool reflector)
     {
         Load();
-        return Thresholds.TryGetValue(antennaId, out float db) ? db : DefaultDb;
+        return Thresholds.TryGetValue(antennaId, out float db) ? db : DefaultFor(reflector);
     }
 
-    public static void Set(long antennaId, float db)
+    public static void Set(long antennaId, bool reflector, float db)
     {
         Load();
         db = (float)Math.Round(Math.Max(0f, Math.Min(MaxDb, db)));
-        if (Math.Abs(db - DefaultDb) < 0.01f) Thresholds.Remove(antennaId); else Thresholds[antennaId] = db;
+        if (Math.Abs(db - DefaultFor(reflector)) < 0.01f) Thresholds.Remove(antennaId); else Thresholds[antennaId] = db;
         if (!_dirty) _dirtySince = DateTime.UtcNow;
         _dirty = true;
     }
@@ -67,9 +79,9 @@ internal static class AtcSquelch
             s.Tooltip = MyStringId.GetOrCompute("Traffic calls this antenna picks up are heard only above this signal-to-noise. "
                                                 + "Higher hears only strong, near calls. Yours only: other players keep their own.");
             s.SetLimits(0f, MaxDb);
-            s.Getter = b => Get(b.EntityId);
-            s.Setter = (b, v) => Set(b.EntityId, v);
-            s.Writer = (b, sb) => sb.Append(Get(b.EntityId).ToString("0", CultureInfo.InvariantCulture)).Append(" dB");
+            s.Getter = b => Get(b.EntityId, IsReflector(b));
+            s.Setter = (b, v) => Set(b.EntityId, IsReflector(b), v);
+            s.Writer = (b, sb) => sb.Append(Get(b.EntityId, IsReflector(b)).ToString("0", CultureInfo.InvariantCulture)).Append(" dB");
             s.Visible = b => b is IMyRadioAntenna;
             s.SupportsMultipleBlocks = true;
             _slider = s;
@@ -87,6 +99,8 @@ internal static class AtcSquelch
         _slider = null;
         SaveIfDirty(force: true);
     }
+
+    private static bool IsReflector(IMyTerminalBlock b) => RadioAim.TryKindOf(b?.BlockDefinition.SubtypeName, out _);
 
     private static void OnCustomControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls)
     {
