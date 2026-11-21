@@ -125,6 +125,17 @@ namespace Factions.Core
             return true;
         }
 
+        /// <summary>Takes <paramref name="key"/> out of the queue: its fleet no longer wants the spawn.
+        /// Without this a withdrawn key at the head holds every spawn behind it for
+        /// <see cref="QueueStaleSeconds"/>. False when the spawn has already started; that one lands.</summary>
+        public bool Withdraw(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return true;
+            if (key == _inFlight) return false;
+            if (_waiting.Remove(key)) _order.Remove(key);
+            return true;
+        }
+
         /// <summary>The spawn has landed (or failed): the next may start a spacing from now.</summary>
         public void Landed(string key, DateTime now)
         {

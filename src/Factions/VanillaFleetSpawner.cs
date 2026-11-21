@@ -93,6 +93,27 @@ namespace Factions
             return Remote != null && Remote.IsSpawningUnder(fleetKey);
         }
 
+        /// <summary>Authority: drops a spawn its fleet no longer wants, whether an agent or the local
+        /// pacer is holding it. False when it can no longer be stopped — the prefab is loading, or it
+        /// has landed and waits to be taken — and the caller lets it land.</summary>
+        internal bool WithdrawSpawn(string fleetKey)
+        {
+            if (fleetKey == null || _inFlight.Contains(fleetKey) || _completed.ContainsKey(fleetKey)) return false;
+            if (Remote != null)
+            {
+                if (Remote.Withdraw(fleetKey, DateTime.UtcNow)) return true;
+                long landed;
+                if (Remote.TryPeekSpawn(fleetKey, out landed)) return false;
+            }
+            return SpawnPacing.Pacer.Withdraw(SpawnPacing.FleetKey(fleetKey));
+        }
+
+        /// <summary>Agent: takes a withdrawn spawn out of the local pacer's queue.</summary>
+        internal void WithdrawQueued(string fleetKey)
+        {
+            if (fleetKey != null) SpawnPacing.Pacer.Withdraw(SpawnPacing.FleetKey(fleetKey));
+        }
+
         /// <summary>Agent: whether a spawn under <paramref name="fleetKey"/> is still on its way.</summary>
         internal bool SpawnInFlight(string fleetKey) { return _inFlight.Contains(fleetKey); }
 
@@ -1769,7 +1790,12 @@ namespace Factions
                     if (_munitionIdBySpawnKey.TryGetValue(BaseSpawnKey(fleetKey), out landedId)) UnstageMunitions(landedId);
                     return remoteEid;
                 }
-                if (Remote.IsSpawning(fleetKey)) return 0;
+                if (Remote.IsSpawning(fleetKey))
+                {
+                    // Still waiting on the agent: it spawns where the fleet is, not where it was.
+                    Remote.Respot(fleetKey, posKm, targetKm, DateTime.UtcNow);
+                    return 0;
+                }
             }
 
             // Resolve prefab name: the dispatch-time ShipPrefabId wins when supplied, so the spawned

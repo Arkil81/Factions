@@ -183,6 +183,14 @@ namespace Factions
         // Grids that have already written their one FLEET_SPAWN_HELD line. Emptied whenever no grid
         // is inside its settle grace, and on the despawn that ends a held grid's life.
         private readonly HashSet<long> _settleHeldReported = new HashSet<long>();
+        // Grid eid -> marked when a grid in its settle grace has no player within the despawn radius,
+        // cleared the first time one is. Still marked when the leave-range exit closes it: the grid
+        // landed where nobody could keep it (FAC-512).
+        private readonly TimedHold<long> _landedUnseen = new TimedHold<long>();
+        private static readonly TimeSpan LandedUnseenFor = TimeSpan.FromSeconds(60);
+        // FleetId -> the last such landing, so the next spawn is let through only where it would be
+        // kept rather than retried at the same place (FAC-512).
+        private readonly UnseenLandings _unseenLandings = new UnseenLandings();
 
         private ChatManagerServer _chat; // set via AttachChat; null = fleet-progress messages are skipped
         private Func<Vec3, double, IEnumerable<ulong>> _playersWithin; // set at the top of each UpdateObservation call
@@ -8020,6 +8028,8 @@ namespace Factions
             _rematerialiseAfter.Prune(now);
             _combatHolds.Prune(now, TimeSpan.FromMinutes(10));
             _spawnSettle.Prune(now);
+            _landedUnseen.Prune(now);
+            _unseenLandings.Prune(now);
             _legOrigins.Prune(now, LegOriginPruneAge);
             if (_spawnSettle.Count == 0 && _settleHeldReported.Count > 0) _settleHeldReported.Clear();
             SweepDepartures(now, isPlayerWithin);
@@ -8203,7 +8213,17 @@ namespace Factions
 
                         // Not yet materialised — check player proximity to sim position
                         Vec3 currentPos = fleet.CurrentPosKm(now, _tuning);
-                        if (!isPlayerWithin(currentPos, _tuning.ObservationRadiusKm)) continue;
+                        if (!isPlayerWithin(currentPos, _tuning.ObservationRadiusKm))
+                        {
+                            _unseenLandings.Release(fleet.FleetId);
+                            continue;
+                        }
+
+                        // Its last grid landed where no player could keep it: spawn again only where
+                        // the next one would be kept (UnseenLandings).
+                        if (_unseenLandings.Count > 0
+                            && _unseenLandings.Holds(fleet.FleetId, currentPos, now, isPlayerWithin,
+                                                     _tuning.ObservationRadiusKm + DespawnHysteresisKm)) continue;
 
                         // The load governor's Factions step (FactionsLoadActuator): under load,
                         // traffic a player came near resolves off-screen, and combat waits with its
@@ -8306,10 +8326,31 @@ namespace Factions
                         }
                         else
                         {
+                            var routing = _spawner as VanillaFleetSpawner;
+
+                            // Still waiting its turn, and no player is near the fleet any more: the grid
+                            // would land unseen and be closed at the end of its settle grace, a full
+                            // spawn for nothing (FAC-512: 81 of 2,117 spawns over two days). Dropped
+                            // instead; the gate asks again if a player comes back. The keep radius,
+                            // not the gate's, so the two cannot alternate on a player at the edge. A
+                            // squadron's hulls land one by one and a fight's are its own; both wait.
+                            if (routing != null && !fleet.IsBench && !SpawnsAsSquadron(fleet)
+                                && !_meetingSpawnAt.ContainsKey(fleetKey)
+                                && !isPlayerWithin(fleet.CurrentPosKm(now, _tuning), _tuning.ObservationRadiusKm + DespawnHysteresisKm)
+                                && routing.WithdrawSpawn(fleetKey))
+                            {
+                                _spawnsInFlight.Remove(fleetKey);
+                                var withdrawn = fleet;
+                                withdrawn.MaterialisedEntityId = 0;
+                                st.PendingFleets[fi] = withdrawn;
+                                _log.Write("SPAWN_WITHDRAWN " + fleet.LogId + " " + fleet.ActorTag + " kind=" + fleet.Kind
+                                           + " — no player within despawn radius");
+                                continue;
+                            }
+
                             // Waiting in the spawn queue is not a stalled spawn: keep its clock fresh.
                             // Nor is a spawn an agent is still answering (FAC-506): the agent's own
                             // queue and timeout run there, and the registry gives up a silent one.
-                            var routing = _spawner as VanillaFleetSpawner;
                             if (SpawnPacing.Pacer.IsQueued(SpawnPacing.FleetKey(fleetKey))
                                 || (routing != null && routing.AwaitsRemoteSpawn(fleetKey)))
                                 _spawnsInFlight[fleetKey] = now;
@@ -8807,6 +8848,7 @@ namespace Factions
                             // This prevents wrecks from accumulating permanently at player bases.
                             if (isPlayerWithin(checkPos, PlayerInteractionKm))
                             {
+                                if (_landedUnseen.Count > 0) _landedUnseen.Release(fleet.MaterialisedEntityId);
                                 DateTime stalledAt;
                                 bool crashedTooLong = isStalled
                                     && _stalledSince.TryGetValue(fleet.MaterialisedEntityId, out stalledAt)
@@ -8840,6 +8882,7 @@ namespace Factions
                                 long leftEid = fleet.MaterialisedEntityId;
                                 if (_spawnSettle.IsHeld(leftEid, now))
                                 {
+                                    if (!_landedUnseen.IsHeld(leftEid, now)) _landedUnseen.Arm(leftEid, now, LandedUnseenFor);
                                     DateTime spawnedAt;
                                     if (_settleHeldReported.Add(leftEid) && _spawnSettle.TryGetSince(leftEid, out spawnedAt))
                                         _log.Write("FLEET_SPAWN_HELD " + fleet.LogId + " " + fleet.ActorTag + " eid=" + leftEid
@@ -8848,10 +8891,17 @@ namespace Factions
                                 }
                                 else
                                 {
-                                    CloseForRange(st, fi, fleet, leftEid, now, "FLEET_DESPAWN");
+                                    bool unseen = _landedUnseen.IsHeld(leftEid, now);
+                                    if (unseen)
+                                    {
+                                        _landedUnseen.Release(leftEid);
+                                        _unseenLandings.Note(fleet.FleetId, checkPos, fleet.CurrentPosKm(now, _tuning), now);
+                                    }
+                                    CloseForRange(st, fi, fleet, leftEid, now, "FLEET_DESPAWN", unseen ? " landed=unseen" : null);
                                     continue;
                                 }
                             }
+                            else if (_landedUnseen.Count > 0) _landedUnseen.Release(fleet.MaterialisedEntityId);
 
                             if (physKm.HasValue)
                             {
@@ -9038,7 +9088,8 @@ namespace Factions
         /// <summary>Closes a live fleet's grids and returns it to abstract transit, holding it off the
         /// spawn path for a moment so the sim marker cannot request it straight back. The fleet keeps
         /// its hulls; <paramref name="eventName"/> names why in the decision log.</summary>
-        private void CloseForRange(FactionState st, int fi, PendingFleetAction fleet, long eid, DateTime now, string eventName)
+        private void CloseForRange(FactionState st, int fi, PendingFleetAction fleet, long eid, DateTime now, string eventName,
+                                   string suffix = null)
         {
             fleet = SettleHulls(fleet, eid, "player_left");
             int grids = _spawner.Despawn(eid);
@@ -9054,7 +9105,7 @@ namespace Factions
                 _rematerialiseAfter.Arm(fleet.FleetId, now, LeaveRangeRespawnBackoff);
             _log.Write(eventName + " " + fleet.LogId + " " + fleet.ActorTag + " eid=" + eid
                        + EscortsToken(escortsClosed)
-                       + " closed=" + (grids + escortGrids));
+                       + " closed=" + (grids + escortGrids) + (suffix ?? ""));
         }
 
         private void BeginMaterialize(FactionState st, int fi, PendingFleetAction fleet, DateTime now)

@@ -25,6 +25,12 @@ namespace Factions.Core
         /// <summary>Take over a fleet grid that arrived here from another server's sector, under
         /// <c>Key</c>, <c>Kind</c>, <c>Tag</c>, <c>Prefab</c> and <c>MunitionsId</c>. A retarget follows.</summary>
         Adopt = 10,
+        /// <summary>A spawn still waiting: move it to <c>X,Y,Z</c>, aimed at <c>Tx,Ty,Tz</c>, where
+        /// the fleet is now. An agent's pacer can hold a spawn for minutes (FAC-512).</summary>
+        Respot = 11,
+        /// <summary>Drop the spawn under <c>Key</c>: no player is near the fleet any more. One that
+        /// already landed, or lands after this, is closed.</summary>
+        Withdraw = 12,
     }
 
     /// <summary>A held grid's weapon bands.</summary>
@@ -248,6 +254,8 @@ namespace Factions.Core
             public readonly List<NexusFleetOrder> Outbox = new List<NexusFleetOrder>();
             public readonly Dictionary<string, NexusFleetOrder> Spawning = new Dictionary<string, NexusFleetOrder>(StringComparer.Ordinal);
             public readonly Dictionary<string, DateTime> SpawnedUtc = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+            /// <summary>When each waiting spawn was last moved; pruned by <see cref="Expire"/>.</summary>
+            public readonly Dictionary<string, DateTime> RespotUtc = new Dictionary<string, DateTime>(StringComparer.Ordinal);
         }
 
         private readonly Dictionary<long, Grid> _grids = new Dictionary<long, Grid>();
@@ -300,6 +308,57 @@ namespace Factions.Core
             h.SpawnedUtc[order.Key] = nowUtc;
         }
 
+        /// <summary>A waiting spawn is moved no more often than this.</summary>
+        public static readonly TimeSpan RespotEvery = TimeSpan.FromSeconds(2);
+        /// <summary>Nor for less than this, in its position or its target.</summary>
+        public const double RespotMinKm = 0.5;
+
+        /// <summary>Moves the spawn waiting under <paramref name="key"/> to where its fleet is now
+        /// (<see cref="NexusFleetOp.Respot"/>). An agent spawns at the order's position whenever its
+        /// pacer lets it, which on production was a median 27 s after the order for the spawns that
+        /// landed where no player was (FAC-512). True when an order was queued.</summary>
+        public bool Respot(string key, Vec3 posKm, Vec3 targetKm, DateTime nowUtc)
+        {
+            if (key == null) return false;
+            foreach (Home h in _homes.Values)
+            {
+                NexusFleetOrder o;
+                if (!h.Spawning.TryGetValue(key, out o)) continue;
+                DateTime last;
+                if (h.RespotUtc.TryGetValue(key, out last) && nowUtc - last < RespotEvery) return false;
+                double moved = posKm.DistanceTo(new Vec3(o.X, o.Y, o.Z));
+                double turned = targetKm.DistanceTo(new Vec3(o.Tx, o.Ty, o.Tz));
+                if (moved < RespotMinKm && turned < RespotMinKm) return false;
+                o.X = posKm.X; o.Y = posKm.Y; o.Z = posKm.Z;
+                o.Tx = targetKm.X; o.Ty = targetKm.Y; o.Tz = targetKm.Z;
+                h.RespotUtc[key] = nowUtc;
+                Queue(h, new NexusFleetOrder
+                {
+                    Op = NexusFleetOp.Respot, Key = key,
+                    X = posKm.X, Y = posKm.Y, Z = posKm.Z, Tx = targetKm.X, Ty = targetKm.Y, Tz = targetKm.Z,
+                }, nowUtc);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Gives up the spawn waiting under <paramref name="key"/> and tells its agent to drop
+        /// it (<see cref="NexusFleetOp.Withdraw"/>). A grid the agent reports under the key afterwards
+        /// is not taken: it is not ours, and the agent closes it. False when no spawn was waiting.</summary>
+        public bool Withdraw(string key, DateTime nowUtc)
+        {
+            if (key == null) return false;
+            foreach (Home h in _homes.Values)
+            {
+                if (!h.Spawning.Remove(key)) continue;
+                h.SpawnedUtc.Remove(key);
+                h.RespotUtc.Remove(key);
+                Queue(h, new NexusFleetOrder { Op = NexusFleetOp.Withdraw, Key = key }, nowUtc);
+                return true;
+            }
+            return false;
+        }
+
         public bool IsSpawning(string key)
         {
             if (key == null) return false;
@@ -318,6 +377,13 @@ namespace Factions.Core
                         && (key.Length == fleetKey.Length || key[fleetKey.Length] == '#'))
                         return true;
             return false;
+        }
+
+        /// <summary>Whether a finished spawn waits to be taken under <paramref name="key"/>, without taking it.</summary>
+        public bool TryPeekSpawn(string key, out long eid)
+        {
+            eid = 0;
+            return key != null && _completed.TryGetValue(key, out eid);
         }
 
         /// <summary>The finished spawn for <paramref name="key"/>, taken once: the grid's id, or 0
@@ -980,6 +1046,12 @@ namespace Factions.Core
             var abandoned = new List<string>();
             foreach (Home h in _homes.Values)
             {
+                if (h.RespotUtc.Count > 0)
+                {
+                    List<string> done = null;
+                    foreach (string key in h.RespotUtc.Keys) if (!h.Spawning.ContainsKey(key)) (done ?? (done = new List<string>())).Add(key);
+                    if (done != null) foreach (string key in done) h.RespotUtc.Remove(key);
+                }
                 List<string> late = null;
                 foreach (KeyValuePair<string, DateTime> kv in h.SpawnedUtc)
                     if (nowUtc - kv.Value > SpawnTimeout) (late ?? (late = new List<string>())).Add(kv.Key);

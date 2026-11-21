@@ -61,6 +61,8 @@ namespace Factions
         {
             public NexusFleetOrder Order;
             public DateTime StartedUtc;
+            /// <summary>Withdrawn while its prefab was loading: closed the moment it lands.</summary>
+            public bool Withdrawn;
         }
 
         private readonly VanillaFleetSpawner _spawner;
@@ -189,6 +191,17 @@ namespace Factions
                     return;
                 case NexusFleetOp.Despawn:
                     Close(o.Eid, nowUtc);
+                    return;
+                case NexusFleetOp.Respot:
+                {
+                    Spawning sp;
+                    if (o.Key == null || !_spawning.TryGetValue(o.Key, out sp) || sp.Withdrawn) return;
+                    sp.Order.X = o.X; sp.Order.Y = o.Y; sp.Order.Z = o.Z;
+                    sp.Order.Tx = o.Tx; sp.Order.Ty = o.Ty; sp.Order.Tz = o.Tz;
+                    return;
+                }
+                case NexusFleetOp.Withdraw:
+                    Withdraw(o.Key, nowUtc);
                     return;
                 case NexusFleetOp.Retarget:
                     if (!_grids.TryGetValue(o.Eid, out h)) return;
@@ -431,6 +444,34 @@ namespace Factions
             if (old != null) foreach (string id in old) _munitions.Remove(id);
         }
 
+        /// <summary>The authority gave up a spawn: no player is near its fleet any more. A queued one is
+        /// dropped, a loading one is closed as it lands, and one that landed before the order got here
+        /// is closed now.</summary>
+        private void Withdraw(string key, DateTime nowUtc)
+        {
+            if (key == null) return;
+            Spawning sp;
+            if (_spawning.TryGetValue(key, out sp))
+            {
+                if (_spawner.SpawnInFlight(key)) { sp.Withdrawn = true; return; }
+                _spawning.Remove(key);
+                _spawner.WithdrawQueued(key);
+                long eid;
+                if (_spawner.TryTakeSpawn(key, out eid) && eid > 0) _spawner.Despawn(eid);
+                Log.Info("NEXUS_FLEET_WITHDRAWN key=" + key + " state=queued waited="
+                         + (nowUtc - sp.StartedUtc).TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "s");
+                return;
+            }
+            List<long> landed = null;
+            foreach (Held g in _grids.Values) if (g.Key == key) (landed ?? (landed = new List<long>())).Add(g.Eid);
+            if (landed == null) return;
+            foreach (long eid in landed)
+            {
+                Close(eid, nowUtc);
+                Log.Info("NEXUS_FLEET_WITHDRAWN key=" + key + " state=landed eid=" + eid);
+            }
+        }
+
         private void TickSpawns(DateTime nowUtc)
         {
             if (_spawning.Count == 0) return;
@@ -441,6 +482,14 @@ namespace Factions
                 Spawning s = _spawning[key];
                 NexusFleetOrder o = s.Order;
                 long eid;
+                if (s.Withdrawn)
+                {
+                    if (_spawner.SpawnInFlight(key)) continue;
+                    _spawning.Remove(key);
+                    if (_spawner.TryTakeSpawn(key, out eid) && eid > 0) _spawner.Despawn(eid);
+                    Log.Info("NEXUS_FLEET_WITHDRAWN key=" + key + " state=loading" + (eid > 0 ? " eid=" + eid : ""));
+                    continue;
+                }
                 if (!_spawner.TryTakeSpawn(key, out eid))
                 {
                     if (_spawner.SpawnInFlight(key)) continue;
