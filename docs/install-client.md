@@ -33,6 +33,9 @@ option `-sources`. Without it, the **Sources** button used below does not appear
 To add the launch option in Steam:
 
 1. In your Steam library, right-click **Space Engineers** and choose **Properties**.
+
+   ![Right-click Space Engineers in the Steam library and choose Properties](images/install/steam-properties.png)
+
 2. On the **General** page, find the **Launch Options** box. It may already contain text, for
    example the line that makes Steam start the game through Pulsar, which ends in `%command%`.
    Leave any existing text as it is.
@@ -51,18 +54,31 @@ it should now contain
 "C:\Users\you\AppData\Roaming\Pulsar\Legacy.exe" %command% -sources
 ```
 
+In Steam, the finished launch options look like this:
+
+![Steam launch options naming Pulsar's Legacy.exe, with -sources at the end](images/install/launch-options.png)
+
 You only need to do this once. The option stays in place for every future game start.
 
 ## Install
 
 1. Start Space Engineers and click **Plugins** in the main menu.
+
+   ![The Plugins button at the bottom of the Space Engineers main menu](images/install/main-menu-plugins.png)
+
 2. Click **Sources**. The first time, Pulsar shows an **External Sources Warning**: plugins can run
    any code, so only add sources you trust. Click **Acknowledge**.
+
+   ![The Sources button in the Pulsar plugin window](images/install/sources-button.png)
+
 3. The Sources window has three columns: **Hubs**, **Plugins** and **Mods**. The Hubs and Plugins
    columns each have a button with the same link icon. Use the one under **Plugins**, whose tooltip
    reads **Add Remote Plugin**. It opens a dialog titled **Remote Plugin Source** with four fields.
    If the dialog asks for a **Display Name** and has no **Metadata File**, it is the hub dialog:
    cancel it and use the button under Plugins.
+
+   ![The Add Remote Plugin button below the Plugins column of the Sources window](images/install/add-remote-plugin-button.png)
+
 
    The quickest way to fill the dialog: copy this line to the clipboard *before* clicking the
    button, and Pulsar fills in all four fields itself:
@@ -82,10 +98,27 @@ You only need to do this once. The option stays in place for every future game s
 
    **Check the Metadata File field before you click Add. Pulsar fills it in with `PluginHub.xml`,
    which is wrong for Factions UI and easy to miss. It must read `FactionsUI.xml`.** With the wrong
-   file name the source is saved anyway, and Factions UI never appears in the plugin list.
+   file name the source is saved anyway, and Factions UI is never offered.
+
+   ![The Remote Plugin Source dialog filled in, with FactionsUI.xml as the Metadata File](images/install/remote-plugin-source.png)
 
    Click **Add**, then **Apply**.
-4. Back in the plugin list, find **Factions UI**, tick **Enabled**, and click **Apply**.
+4. Back in the plugin window, click the **+** button below the plugin list. Its tooltip reads
+   **Add plugin**. The plugin list shows only the plugins you have enabled, so Factions UI is not
+   in it yet.
+
+   ![The Add plugin button below the plugin list](images/install/add-plugin-button.png)
+
+   In the window that opens, type `Factions` in the search box, and tick the box on the
+   **Factions UI** card. Its author is Arkil81 and its source is GitHub. Close the window.
+
+   ![Searching for Factions in the Add plugin window, with the Factions UI card](images/install/add-plugin-search.png)
+
+   Factions UI now appears in the plugin list. Its version reads N/A until Pulsar has built it.
+   Click **Apply**.
+
+   ![Factions UI in the plugin list](images/install/plugin-list.png)
+
 5. Pulsar asks to restart the game. Accept. Pulsar downloads and compiles the plugin during start-up,
    so this start takes longer than usual.
 
@@ -116,11 +149,11 @@ it for `FactionsUI:`.
 
 ## Troubleshooting
 
-- **Factions UI is not in the plugin list, and the source is right.** Check that the launch options
-  name `Legacy.exe`. Under `Interim.exe`, Pulsar leaves Factions UI out of the list.
+- **Factions UI is not offered in the Add plugin window, and the source is right.** Check that the launch options
+  name `Legacy.exe`. Under `Interim.exe`, Pulsar leaves Factions UI out.
 - **No Sources button.** The game was started without `-sources`; check the launch options and
   restart.
-- **Factions UI is not in the plugin list.** In **Sources**, click the Factions entry under
+- **Factions UI is not offered in the Add plugin window.** In **Sources**, click the Factions entry under
   **Plugins** and check its **File**. It must read `FactionsUI.xml`; `PluginHub.xml` is the
   auto-filled default and the usual cause. Adding the source again does not fix it: Pulsar answers
   "This source already exists in the list." and keeps the old entry. Remove the entry, click
