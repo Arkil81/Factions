@@ -29,7 +29,7 @@ namespace Factions
     /// built into a reused buffer and handed to a background sender. Per census interval: one walk
     /// of the entity list. Nothing here waits on a socket, and nothing allocates per frame.</para>
     /// </summary>
-    internal sealed class ServerPerfMonitor : IDisposable
+    internal sealed partial class ServerPerfMonitor : IDisposable
     {
         private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
@@ -365,7 +365,7 @@ namespace Factions
             if (_censusValid) BuildCensusPoints(timestamp);
             if (_censusValid && _censusFresh && _census.SimSetValid) BuildSimSetPoints(timestamp);
             if (entityCost != null) BuildEntityCostPoints(entityCost, timestamp);
-            if (pbCost != null) BuildPbCostPoints(pbCost, timestamp);
+            PbCostSummary.Result pbSummary = pbCost != null ? BuildPbCostPoints(pbCost, timestamp) : null;
             _tailFrames = 0;
             _tailStallMs = 0;
             _tailByCause.Clear();
@@ -378,9 +378,13 @@ namespace Factions
                 ledger = BuildLedgerPoints(entityCost, timestamp);
                 if (ledger != null && _busySamples > 0)
                     EvaluateGovernor(ledger, simRatio, timestamp);
+                if (ledger != null) ObservePrefabCosts(entityCost, ledger.ParallelScale);
             }
             if (_busySamples > 0)
                 EvaluateTraffic(ledger, nowUtc, windowSec, timestamp);
+
+            try { _lastTop = BuildTop(nowUtc, windowSec, entityCost, ledger, pbSummary); }
+            catch (Exception ex) { _lastTop = null; Log.Warn("Server perf: top snapshot failed: " + ex.Message); }
 
             if (_publisher != null) _publisher.Enqueue(_batch.Build());
         }
@@ -1246,7 +1250,7 @@ namespace Factions
         ///
         /// <para>The party is the grid's, from the last census; a grid it has not seen yet reads
         /// <see cref="PbCostSummary.UnknownParty"/>.</para></summary>
-        private void BuildPbCostPoints(List<PbCostSummary.Block> blocks, long timestamp)
+        private PbCostSummary.Result BuildPbCostPoints(List<PbCostSummary.Block> blocks, long timestamp)
         {
             Func<long, string> partyOf = null;
             if (_censusValid)
@@ -1297,6 +1301,7 @@ namespace Factions
                     .Field("maxRunMs", Math.Round(b.Block.MaxRunMs, 3))
                     .End();
             }
+            return r;
         }
 
         /// <summary>Every frame over the hitch threshold in this window, with where it went, and the
@@ -1588,6 +1593,88 @@ namespace Factions
 
         /// <summary>One-line state for <c>factions perf server</c>. A command response, unlike a log
         /// line, may explain itself.</summary>
+        /// <summary>The last closed window's costliest rows, for <c>factions serverperf top</c>.
+        /// Null until a window closes. Written and read on the game thread.</summary>
+        private ServerPerfTop _lastTop;
+
+        internal string DescribeTop(int n)
+        {
+            return ServerPerfTop.Format(_lastTop, n, DateTime.UtcNow);
+        }
+
+        /// <summary>Copies the rows this window already computed for its Influx points; measures
+        /// nothing. Entity rows are absent when per-entity cost is off, ledger rows when there was
+        /// no census, script rows when no script ran.</summary>
+        private ServerPerfTop BuildTop(DateTime nowUtc, double windowSec, EntityCostPatches.Window w,
+                                       LoadLedger.Result ledger, PbCostSummary.Result pb)
+        {
+            var t = new ServerPerfTop
+            {
+                AtUtc = nowUtc,
+                WindowSeconds = windowSec,
+                Frames = _frames,
+                BusyMs = _busySamples > 0 ? ToMs(_busyTicks) / _busySamples : double.NaN,
+                OursMs = PerFrameRaw(_ours.TotalMilliseconds()),
+                PhysicsMs = _physicsMsPerFrame,
+            };
+            if (w != null)
+            {
+                t.SerialMs = PerFrameRaw(ToMs(w.SerialTicks));
+                t.ParallelCpuMs = PerFrameRaw(ToMs(w.ParallelTicks));
+                t.ParallelWallMs = PerFrameRaw(ToMs(w.ParallelWallTicks));
+                foreach (EntityCostPatches.GridRow r in w.TopGrids)
+                {
+                    string party = null;
+                    if (_censusValid && r.GridId != EntityCostPatches.NotOnAGrid)
+                        _census.PartyByGrid.TryGetValue(r.GridId, out party);
+                    t.EntityGrids.Add(new ServerPerfTop.Row
+                    {
+                        Name = r.GridId == EntityCostPatches.NotOnAGrid ? "(not on a grid)" : GridName(r.GridId),
+                        Party = party,
+                        LogicMs = PerFrameRaw(ToMs(r.TotalTicks)),
+                        Count = r.Calls,
+                    });
+                }
+                foreach (EntityCostPatches.TypeRow r in w.TopTypes)
+                    t.Types.Add(new ServerPerfTop.Row
+                    {
+                        Name = r.Type,
+                        LogicMs = PerFrameRaw(ToMs(r.SerialTicks + r.ParallelTicks)),
+                        Count = r.Calls,
+                    });
+            }
+            if (ledger != null)
+            {
+                t.HasLedger = true;
+                t.UnattributedPhysicsMs = ledger.UnattributedPhysicsMs;
+                foreach (KeyValuePair<string, LoadLedger.PartyCost> kv in ledger.Parties)
+                    t.Parties.Add(new ServerPerfTop.Row
+                    {
+                        Name = kv.Key, LogicMs = kv.Value.LogicMs, PhysicsMs = kv.Value.PhysicsMs,
+                        Count = kv.Value.SimulatedGrids,
+                    });
+                int n = Math.Min(_config.LedgerTopN, ledger.Grids.Count);
+                for (int i = 0; i < n; i++)
+                {
+                    LoadLedger.GridCost g = ledger.Grids[i];
+                    t.Grids.Add(new ServerPerfTop.Row
+                    {
+                        Name = g.Name, Party = g.Party, LogicMs = g.LogicMs, PhysicsMs = g.PhysicsMs,
+                    });
+                }
+            }
+            if (pb != null)
+                foreach (PbCostSummary.BlockRow b in pb.Top)
+                    t.Scripts.Add(new ServerPerfTop.Row
+                    {
+                        Name = BlockName(b.Block.BlockId) + " on "
+                               + (b.Block.GridId == EntityCostPatches.NotOnAGrid ? "(not on a grid)" : GridName(b.Block.GridId)),
+                        Party = b.Party,
+                        LogicMs = b.MsPerFrame,
+                    });
+            return t;
+        }
+
         internal string Describe()
         {
             string where = _publisher == null
@@ -1667,6 +1754,7 @@ namespace Factions
 
         public void Dispose()
         {
+            SavePrefabCosts();
             if (_publisher != null) _publisher.Dispose();
         }
     }

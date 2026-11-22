@@ -114,6 +114,13 @@ namespace Factions
             if (fleetKey != null) SpawnPacing.Pacer.Withdraw(SpawnPacing.FleetKey(fleetKey));
         }
 
+        /// <summary>Agent: whether the spawn for <paramref name="fleetKey"/> is waiting its turn in the
+        /// local pacer's queue.</summary>
+        internal bool SpawnQueued(string fleetKey)
+        {
+            return fleetKey != null && SpawnPacing.Pacer.IsWaiting(SpawnPacing.FleetKey(fleetKey));
+        }
+
         /// <summary>Agent: whether a spawn under <paramref name="fleetKey"/> is still on its way.</summary>
         internal bool SpawnInFlight(string fleetKey) { return _inFlight.Contains(fleetKey); }
 

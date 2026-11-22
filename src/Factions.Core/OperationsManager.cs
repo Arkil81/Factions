@@ -1140,10 +1140,25 @@ namespace Factions.Core
             Dictionary<string, (long Quantity, DemandClass Class)> ownWant =
                 !(InventoryKeyMapper.IsGasKey(subTypeId) && keepsFuel)
                     ? new Dictionary<string, (long Quantity, DemandClass Class)>(StringComparer.Ordinal) : null;
+            // A fuel gas moves instead by gradient: between two nodes both short of their own rows it
+            // flows from the fuller to the emptier, and never past the point that evens them out. The
+            // emptier one is usually the node that just departed, so it is still refilled, and the
+            // fuller one cannot be fed back what it gave. Live 2026-11-22: 60% of ISBT's 12.65 GL of
+            // hydrogen in 14 h was matched by a haul the other way on the same pair.
+            Dictionary<string, long> fuelRow =
+                ownWant == null ? new Dictionary<string, long>(StringComparer.Ordinal) : null;
+            Dictionary<string, long> movedThisPass =
+                fuelRow != null ? new Dictionary<string, long>(StringComparer.Ordinal) : null;
             foreach (DemandEntry demand in demands)
             {
                 if (demand.NodeId == null) continue;
                 if (ownWant != null) RecordOwnWant(ownWant, demand);
+                if (fuelRow != null && demand.Quantity > 0)
+                {
+                    long priorRow;
+                    if (!fuelRow.TryGetValue(demand.NodeId, out priorRow) || demand.Quantity > priorRow)
+                        fuelRow[demand.NodeId] = demand.Quantity;
+                }
                 SpatialNode destNode;
                 if (!world.Graph.Nodes.TryGetValue(demand.NodeId, out destNode)) continue;
                 // A demand outlives the ownership of the node that raised it -- its TTL is minutes
@@ -1280,6 +1295,20 @@ namespace Factions.Core
                         // Only a destination whose class outranks the source's own row may draw it.
                         if (ownReserve != null && ownReserve.TryGetValue(src.Id, out reserved) && target.Class <= reserved.Class)
                             available -= reserved.Reserve;
+                        if (fuelRow != null)
+                        {
+                            long srcRow;
+                            if (fuelRow.TryGetValue(src.Id, out srcRow))
+                            {
+                                long srcStock = ctx.GetNodeInventory(src.Id, subTypeId)
+                                              - world.HaulPickupClaimed(src.Id, subTypeId) + MovedThisPass(movedThisPass, src.Id);
+                                long destStock = ctx.GetNodeInventory(destNodeId, subTypeId) + MovedThisPass(movedThisPass, destNodeId);
+                                long destRow;
+                                fuelRow.TryGetValue(destNodeId, out destRow);
+                                long even = FuelGradientAllowance(srcStock, srcRow, destStock, destRow);
+                                if (even < available) available = even;
+                            }
+                        }
                         if (available <= 0) continue;
 
                         long xfer = available < (cap - transferred)
@@ -1300,6 +1329,11 @@ namespace Factions.Core
                         });
                         remaining[src.Id] -= xfer;
                         transferred += xfer;
+                        if (movedThisPass != null)
+                        {
+                            movedThisPass[src.Id] = MovedThisPass(movedThisPass, src.Id) - xfer;
+                            movedThisPass[destNodeId] = MovedThisPass(movedThisPass, destNodeId) + xfer;
+                        }
 
                         if (transferred >= cap) break;
                     }
@@ -1361,6 +1395,25 @@ namespace Factions.Core
                 if (order[i].Id != destNodeId && remaining.TryGetValue(order[i].Id, out left) && left > 0) return order[i];
             }
             return null;
+        }
+
+        private static long MovedThisPass(Dictionary<string, long> moved, string nodeId)
+        {
+            long v;
+            return moved != null && moved.TryGetValue(nodeId, out v) ? v : 0;
+        }
+
+        /// <summary>How much of a fuel gas a source short of its own row may send a destination: the
+        /// amount that leaves both at the same share of their rows, and nothing when the source is
+        /// already the emptier of the two. A source at or above its row is not limited, and neither
+        /// is a destination without a row (a zero row reads as already full, so it gets nothing).</summary>
+        public static long FuelGradientAllowance(long srcStock, long srcRow, long destStock, long destRow)
+        {
+            if (srcRow <= 0 || srcStock >= srcRow) return long.MaxValue;
+            if (destRow <= 0 || srcStock <= 0) return 0;
+            // (srcStock - x) / srcRow = (destStock + x) / destRow, solved for x.
+            double even = ((double)srcStock * destRow - (double)destStock * srcRow) / ((double)srcRow + destRow);
+            return even <= 0 ? 0 : (long)Math.Floor(even);
         }
 
         /// <summary>A node's own row for the key being matched: the largest quantity and the strongest

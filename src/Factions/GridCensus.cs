@@ -189,6 +189,11 @@ namespace Factions
             public int Blocks;
             public long Pcu;
             public long Shapes;
+            /// <summary>The hull this grid is mounted on (<see cref="WingWorld.HullOf"/>): itself, or
+            /// the ship a rotor turret rides.</summary>
+            public long HullId;
+            /// <summary>That hull is a materialised Factions fleet grid.</summary>
+            public bool OnFleetHull;
             public bool Awake;
             public bool Moving;
             public bool IsStatic;
@@ -351,6 +356,8 @@ namespace Factions
                 return;
             }
             SimulatedIds.Add(grid.EntityId);
+            MyCubeGrid hull = WingWorld.HullOf(grid);
+            long hullId = hull != null ? hull.EntityId : grid.EntityId;
             Simulated.Add(new SimGridRow
             {
                 GridId = grid.EntityId,
@@ -360,6 +367,8 @@ namespace Factions
                 Blocks = grid.BlocksCount,
                 Pcu = grid.BlocksPCU,
                 Shapes = shapes,
+                HullId = hullId,
+                OnFleetHull = _fleetIds.Contains(hullId),
                 Awake = awake,
                 Moving = moving,
                 IsStatic = grid.IsStatic,

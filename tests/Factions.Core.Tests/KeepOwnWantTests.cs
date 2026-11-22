@@ -143,6 +143,44 @@ namespace Factions.Core.Tests
             Assert.Equal("B", haul.TargetNodeId);
         }
 
+        /// <summary>Between two nodes short of a fuel gas it flows from the fuller to the emptier only,
+        /// and only as far as evens them out. Live 2026-11-22: 60% of ISBT's 12.65 GL of hydrogen in
+        /// 14 h was matched by a haul the other way on the same pair. Here B holds 1.8 M of 2.7 M
+        /// (67%) and A 0.9 M of 5.4 M (17%): B sends A 0.9 M, which leaves both at a third, and A
+        /// sends B nothing -- before the rule A, the emptier, also fed B.</summary>
+        [Fact]
+        public void TwoNodesShortOfAFuelGas_OnlyTheFullerFeedsTheEmptier()
+        {
+            const string gas = "Gas:Hydrogen";
+            var world = MakeWorld();
+            world.SetFuelReserveKeys("F", new[] { gas });
+            SpatialNode a = AddNode(world, "A", 0, 0);
+            SpatialNode b = AddNode(world, "B", 1, 0);
+            a.Inventory[gas] = 900_000;
+            b.Inventory[gas] = 1_800_000;
+            world.Demand.Post(new DemandEntry { FactionTag = "F", Kind = "Item:" + gas, NodeId = "A", Quantity = 5_400_000,
+                                                ExpiresUtc = world.UtcNow.AddMinutes(5), Class = DemandClass.Fuel });
+            world.Demand.Post(new DemandEntry { FactionTag = "F", Kind = "Item:" + gas, NodeId = "B", Quantity = 2_700_000,
+                                                ExpiresUtc = world.UtcNow.AddMinutes(5), Class = DemandClass.Fuel });
+
+            PendingFleetAction haul = Assert.Single(Tick(world));
+            Assert.Equal("A", haul.TargetNodeId);
+            Assert.Equal(900_000, haul.Cargo[gas]);
+        }
+
+        [Theory]
+        [InlineData(1_800, 2_700, 900, 5_400, 900)]     // the test above: both end at a third
+        [InlineData(900, 5_400, 1_800, 2_700, 0)]       // the emptier never feeds the fuller
+        [InlineData(900, 5_400, 0, 2_700, 300)]         // both end at a ninth
+        [InlineData(1_000, 2_000, 500, 1_000, 0)]       // already even
+        [InlineData(3_000, 2_000, 0, 1_000, long.MaxValue)]   // a source at or above its row is not limited
+        [InlineData(0, 2_000, 0, 1_000, 0)]             // nothing to send
+        public void FuelGradientAllowance_EvensTheShareOfEachRow(long srcStock, long srcRow, long destStock, long destRow,
+            long expected)
+        {
+            Assert.Equal(expected, OperationsManager.FuelGradientAllowance(srcStock, srcRow, destStock, destRow));
+        }
+
         /// <summary>A gas the faction does not keep as fuel is held back like an item. Live 2026-11-21:
         /// every IGSL node posted a 4 M L oxygen row and read its whole stock as spare, so 73% of its
         /// 92,843 hauls were oxygen and 65% of the volume came back on the same pair.</summary>

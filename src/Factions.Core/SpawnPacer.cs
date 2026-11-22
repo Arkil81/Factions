@@ -166,6 +166,13 @@ namespace Factions.Core
             return false;
         }
 
+        /// <summary>Whether <paramref name="key"/> itself is waiting its turn. Exact and O(1), for a
+        /// caller asking about every spawn it holds each frame.</summary>
+        public bool IsWaiting(string key)
+        {
+            return !string.IsNullOrEmpty(key) && _waiting.ContainsKey(key);
+        }
+
         /// <summary>Returns the window's counters and starts the next window.</summary>
         public void ResetWindow()
         {

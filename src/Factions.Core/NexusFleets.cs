@@ -187,7 +187,8 @@ namespace Factions.Core
         public static readonly TimeSpan MaxSilence = TimeSpan.FromSeconds(30);
         /// <summary>An ask not repeated for this long is no longer sent.</summary>
         public static readonly TimeSpan AskFresh = TimeSpan.FromSeconds(3);
-        /// <summary>A spawn the agent has not answered in this long is given up as failed.</summary>
+        /// <summary>A spawn the agent has not answered in this long is given up as failed. An agent
+        /// reporting it queued (<see cref="NexusAgentReport.SpawnQueued"/>) restarts the clock.</summary>
         public static readonly TimeSpan SpawnTimeout = TimeSpan.FromSeconds(120);
         /// <summary>A gone grid is remembered this long, for the reads made after it went.</summary>
         public static readonly TimeSpan GoneMemory = TimeSpan.FromMinutes(10);
@@ -991,6 +992,9 @@ namespace Factions.Core
             if (spawnFailed != null)
                 foreach (string key in spawnFailed)
                     if (key != null && h.Spawning.Remove(key)) { h.SpawnedUtc.Remove(key); _completed[key] = 0; finished.Add(key); }
+            if (report.SpawnQueued != null)
+                foreach (string key in report.SpawnQueued)
+                    if (key != null && h.Spawning.ContainsKey(key)) h.SpawnedUtc[key] = nowUtc;
             if (closed != null)
                 foreach (long eid in closed)
                 {

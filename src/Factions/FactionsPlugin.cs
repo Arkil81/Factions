@@ -314,19 +314,17 @@ namespace Factions
             else
                 Log.Info("Fauna: " + faunaStatus);
 
+            // Fleet and station debug lines go to online admins only, one whisper each: a debug kind
+            // switched on for a live server must not reach players.
             StationMaterializer.DebugBroadcast = msg =>
             {
                 try
                 {
-                    var chat = new ScriptedChatMsg
-                    {
-                        Author = "[Factions]",
-                        Text   = msg,
-                        Font   = "White",
-                        Color  = VRageMath.Color.Cyan,
-                        Target = 0   // 0 = broadcast to all players
-                    };
-                    MyMultiplayerBase.SendScriptedChatMessage(ref chat);
+                    ChatManagerServer chat = Torch?.CurrentSession?.Managers?.GetManager<ChatManagerServer>();
+                    if (chat == null || MySession.Static == null || MySession.Static.Players == null) return;
+                    foreach (MyPlayer player in MySession.Static.Players.GetOnlinePlayers())
+                        if (SeesDebugOutput(player))
+                            chat.SendMessageAsOther("[Factions]", msg, VRageMath.Color.Cyan, player.Id.SteamId);
                 }
                 catch (Exception ex) { Log.Warn(ex, "DebugBroadcast failed"); }
             };
@@ -663,6 +661,7 @@ namespace Factions
                 // the live catalogue is already correct regardless of whether this write succeeds.
                 LogPrefabCeiling(prefabCatalogue);
                 _prefabBlocks = prefabCatalogue.BlockCount;
+                _ceilingCatalogue = prefabCatalogue;
                 try { File.WriteAllText(Path.Combine(StorageDir, "prefab_catalogue.json"), prefabCatalogue.ToJson()); }
                 catch (Exception ex) { Log.Warn(ex, "Could not refresh prefab_catalogue.json after prefab registration."); }
                 var factionTypeCatalogue = SeFactionTypeCatalogue.Build();
@@ -2927,6 +2926,7 @@ namespace Factions
                 return;
             }
             if (report.Load != null) _agentLoads[homeServerId] = new KeyValuePair<NexusAgentLoad, DateTime>(report.Load, DateTime.UtcNow);
+            if (report.Load != null && report.Load.PrefabCosts != null) _agentPrefabCosts[homeServerId] = report.Load.PrefabCosts;
             else _agentLoads.Remove(homeServerId);
             if (report.Contacts != null)
                 _agentContacts[homeServerId] = new KeyValuePair<List<NexusPlayerContact>, DateTime>(report.Contacts, DateTime.UtcNow);
@@ -4739,6 +4739,72 @@ namespace Factions
         /// <summary>Blocks in a prefab over every grid it spawns, from the catalogue once the session
         /// has loaded; null before. Traffic control prices a fleet with it before the fleet exists.</summary>
         private Func<string, int> _prefabBlocks;
+
+        /// <summary>The catalogue the performance ceiling was applied to, for its re-judge against
+        /// learned costs; null on an agent.</summary>
+        private SePrefabCatalogue _ceilingCatalogue;
+
+        /// <summary>Each agent's last learned prefab costs, by home server id.</summary>
+        private readonly Dictionary<byte, List<PrefabCostLearner.Estimate>> _agentPrefabCosts =
+            new Dictionary<byte, List<PrefabCostLearner.Estimate>>();
+
+        private DateTime _ceilingRejudgedUtc;
+
+        /// <summary>How often the authority re-judges the ceiling against what has been learned.</summary>
+        private static readonly TimeSpan CeilingRejudgeEvery = TimeSpan.FromSeconds(60);
+
+        /// <summary>This server's learned prefab costs merged with every agent's, weighted by the
+        /// windows each was present in.</summary>
+        private Dictionary<string, PrefabCostLearner.Estimate> MergedPrefabCosts()
+        {
+            var sets = new List<IEnumerable<PrefabCostLearner.Estimate>>();
+            if (_serverPerf != null) sets.Add(_serverPerf.PrefabCosts.Estimates());
+            foreach (List<PrefabCostLearner.Estimate> l in _agentPrefabCosts.Values) sets.Add(l);
+            return PrefabCostLearner.Merge(sets);
+        }
+
+        /// <summary>Authority: once a minute, points the ceiling at the merged learned costs (with the
+        /// learned-ceiling switch on) or back at the formula (off), and logs every prefab that crossed it.</summary>
+        private void RejudgeCeiling(DateTime nowUtc)
+        {
+            SePrefabCatalogue catalogue = _ceilingCatalogue;
+            PrefabCeiling ceiling = _prefabCeiling;
+            if (catalogue == null || ceiling == null || !ceiling.Enabled) return;
+            if (nowUtc - _ceilingRejudgedUtc < CeilingRejudgeEvery) return;
+            _ceilingRejudgedUtc = nowUtc;
+            if (FeatureSwitch.IsOn(FeatureSwitch.LearnedCeiling))
+            {
+                Dictionary<string, PrefabCostLearner.Estimate> merged = MergedPrefabCosts();
+                ceiling.Learned = id => { PrefabCostLearner.Estimate e; return merged.TryGetValue(id, out e) ? e : null; };
+            }
+            else ceiling.Learned = null;
+            CultureInfo inv = CultureInfo.InvariantCulture;
+            foreach (SePrefabCatalogue.CeilingChange c in catalogue.RejudgePerformanceCeiling())
+                Log.Info("Prefab ceiling: " + c.PrefabId + " now " + (c.NowOver ? "over" : "under") + " "
+                         + ceiling.CeilingMs.ToString("F2", inv) + " ms/frame awake: "
+                         + (c.Learned != null
+                             ? "learned " + c.Learned.TotalMs.ToString("F2", inv) + " (physics "
+                               + c.Learned.PhysicsMs.ToString("F2", inv) + " + logic " + c.Learned.LogicMs.ToString("F2", inv)
+                               + ", " + c.Learned.Windows.ToString("0", inv) + " windows), formula "
+                             : "formula ")
+                         + c.FormulaMs.ToString("F2", inv) + " for " + c.Blocks + " blocks"
+                         + (c.NowOver ? "; excluded from every role pool." : "; back in the role pools."));
+        }
+
+        /// <summary>Bridge 'factions serverperf prefabs [n]'.</summary>
+        private string DescribePrefabCosts(int n)
+        {
+            if (_serverPerf == null) return "serverperf prefabs: server perf is not running (" + ServerPerfConfig.FileName + ").";
+            bool authority = _ceilingCatalogue != null;
+            var list = authority ? new List<PrefabCostLearner.Estimate>(MergedPrefabCosts().Values) : _serverPerf.PrefabCosts.Estimates();
+            list.Sort((a, b) => b.TotalMs.CompareTo(a.TotalMs));
+            double ceilingMs = _prefabCeiling != null ? _prefabCeiling.CeilingMs : 0;
+            return PrefabCostLearner.Format(list, new PrefabCostLearner.Options().MinWindows, ceilingMs, n)
+                   + "\n" + (authority
+                       ? "Merged over this server and " + _agentPrefabCosts.Count + " agent(s); the ceiling judges by "
+                         + (FeatureSwitch.IsOn(FeatureSwitch.LearnedCeiling) ? "learned cost where established." : "the formula only (learned-ceiling off).")
+                       : "This server's own; the authority's ceiling merges it with the others'.");
+        }
         private readonly List<PendingFleetAction> _materialisedScratch = new List<PendingFleetAction>();
 
         /// <summary>Traffic control, slice 1 (docs/traffic-control.md): a spawn is starting; ask the
@@ -5167,6 +5233,7 @@ namespace Factions
                 KCivilian = perf.Traffic.CivilianMultiplier,
                 KCombat = perf.Traffic.CombatMultiplier,
                 FactionsStep = perf.GovernorFactionsActuate ? perf.GovernorFactionsStep : 0,
+                PrefabCosts = perf.TakeFreshPrefabCosts(),
             };
         }
 
@@ -5264,6 +5331,16 @@ namespace Factions
 
                 _serverPerf = new ServerPerfMonitor(config, InstanceDir);
                 Log.Info(_serverPerf.Describe());
+                _prefabCeiling.LearnedMinWindows = new PrefabCostLearner.Options().MinWindows;
+                // The authority knows its own hulls' prefabs; an agent knows the ones it flies.
+                _serverPerf.PrefabOfGrid = id =>
+                {
+                    VanillaFleetSpawner spawner = _fleetSpawner;
+                    if (spawner != null) return spawner.GridPrefabId(id);
+                    Func<long, string> agent = CrewPresence.AgentPrefabOf;
+                    return agent != null ? agent(id) : null;
+                };
+                Log.Info(_serverPerf.LoadPrefabCosts(InstanceDir));
             }
             catch (Exception ex)
             {
@@ -5280,6 +5357,7 @@ namespace Factions
             try
             {
                 FactionRuntime runtime = _runtime;
+                if (runtime != null) RejudgeCeiling(DateTime.UtcNow);
                 if (runtime != null && runtime.MaterialiseGate == null)
                 {
                     ServerPerfMonitor perf = _serverPerf;
@@ -5939,13 +6017,22 @@ namespace Factions
         }
 
         /// <summary>
-        /// Push a GPS marker to every online player's HUD for each active fleet with debug on.
+        /// Push a GPS marker to every online admin's HUD for each active fleet with debug on
+        /// (<see cref="SeesDebugOutput"/>); players never get them.
         /// Called every ~5 s while any debug flag is on. Each marker has a 15 s TTL so stale
         /// positions auto-expire cleanly; the 5 s refresh keeps them current.
         /// When the fleet is already materialised, EntityId is set so the marker auto-tracks
         /// the physical grid and the hash stays stable (no flicker).
         /// Colours: Trade=Cyan, Raid=Red, Patrol=Yellow.
         /// </summary>
+        /// <summary>True for an online player at admin or above: the only audience for fleet and
+        /// station debug output, in chat or on the HUD.</summary>
+        private static bool SeesDebugOutput(MyPlayer player)
+        {
+            if (player == null || player.Id.SteamId == 0UL || MySession.Static == null) return false;
+            return MySession.Static.GetUserPromoteLevel(player.Id.SteamId) >= VRage.Game.ModAPI.MyPromoteLevel.Admin;
+        }
+
         private void BroadcastFleetGps()
         {
             if (_runtime == null || MySession.Static == null) return;
@@ -5963,6 +6050,7 @@ namespace Factions
 
                 foreach (var player in MySession.Static.Players.GetOnlinePlayers())
                 {
+                    if (!SeesDebugOutput(player)) continue;
                     long identityId = player.Identity.IdentityId;
 
                     Dictionary<string, int> playerHashes;
@@ -6592,6 +6680,25 @@ namespace Factions
                 }
                 case "serverperf":
                 {
+                    // 'factions serverperf top [n]': the last window's costliest parties, grids,
+                    // entity types and scripts -- the rows otherwise written only to InfluxDB.
+                    // 'factions serverperf prefabs [n]': what each prefab flown here was measured to cost.
+                    if (t.Length > 2 && string.Equals(t[2], "prefabs", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int prefabN = 15;
+                        if (t.Length > 3) int.TryParse(t[3], out prefabN);
+                        result = DescribePrefabCosts(prefabN);
+                        return true;
+                    }
+                    if (t.Length > 2 && string.Equals(t[2], "top", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int topN = 10;
+                        if (t.Length > 3) int.TryParse(t[3], out topN);
+                        result = _serverPerf != null
+                            ? _serverPerf.DescribeTop(topN)
+                            : "serverperf top: server perf is not running (" + ServerPerfConfig.FileName + ").";
+                        return true;
+                    }
                     result = _serverPerf != null
                         ? _serverPerf.Describe()
                         : "Server perf: not running. Set Enabled true in " + ServerPerfConfig.FileName

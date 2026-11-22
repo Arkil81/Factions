@@ -816,6 +816,13 @@ namespace Factions
                     concrete.SafeZoneEntityId = 0L;
                 }
 
+                // One Factions spawn at a time, a spacing apart (SpawnPacing). Refused: the next pass
+                // comes back here and asks again. Asked before the placement below, which re-measures,
+                // re-persists and logs: a station waiting its turn would otherwise redo all of it every
+                // frame it waits. Past this point every path reaches the spawn.
+                double pacedWait;
+                if (!SpawnPacing.Pacer.TryBegin(SpawnPacing.StationKey(nodeId), DateTime.UtcNow, out pacedWait)) return;
+
                 Vector3D stPos      = station.Position;
                 Vector3  stForward  = (Vector3)concrete.Forward;  // station transform, not world
                 Vector3  stUp       = (Vector3)concrete.Up;       // axes -- planetary stations tilt
@@ -1042,13 +1049,6 @@ namespace Factions
                 string   stName     = concrete.Name;
                 MyFaction mFaction  = faction;
                 IMyFaction iFaction = faction;
-
-                // Belt and braces for a station founded since the last observation tick, which the
-                // graph refresh has not seen yet.
-                // One Factions spawn at a time, a spacing apart (SpawnPacing). Refused: the next
-                // observation pass comes back here and asks again.
-                double pacedWait;
-                if (!SpawnPacing.Pacer.TryBegin(SpawnPacing.StationKey(nodeId), DateTime.UtcNow, out pacedWait)) return;
 
                 _managedIds.Add(stableId);
                 _materialized[nodeId] = new MaterializedStation

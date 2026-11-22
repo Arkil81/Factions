@@ -31,7 +31,14 @@ namespace Factions.Core
         /// (TransitRisk).</summary>
         public const string FleetTrespass = "fleet-trespass";
 
-        public static readonly string[] Known = { PhysicsPerWorld, StationVoxels, StationLoot, FleetTrespass };
+        /// <summary>The prefab performance ceiling judges a prefab by its learned cost (PrefabCostLearner)
+        /// once one is established, not by the bench formula alone. It takes hulls out of role pools
+        /// mid-session, so it is switched (AGENTS.md rule 8): off on its first deploy, while the
+        /// learned table is read against the formula; learning and `factions serverperf prefabs` run
+        /// either way.</summary>
+        public const string LearnedCeiling = "learned-ceiling";
+
+        public static readonly string[] Known = { PhysicsPerWorld, StationVoxels, StationLoot, FleetTrespass, LearnedCeiling };
 
         private static readonly Dictionary<string, bool> State =
             new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)

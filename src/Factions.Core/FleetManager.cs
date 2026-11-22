@@ -560,7 +560,9 @@ namespace Factions.Core
                             // free, the gate below admits on defenceDps=0, and the raid flies into
                             // the reinforcement MarshalDefence sends a minute later. Read with the
                             // marshal's own walk, so both sides price one response.
-                            List<string> responseHulls = ProjectedGuardResponse(world, tuning, target, null);
+                            FactionState targetOwner = FindState(states, target.OwnerFactionTag);
+                            List<string> responseHulls = ProjectedGuardResponse(world, tuning, target, null,
+                                targetOwner != null ? targetOwner.CentralBankRecentIncome : 0);
                             if (responseHulls.Count > 0)
                             {
                                 List<WeaponBand> responseBands = new List<WeaponBand>();
@@ -1729,14 +1731,16 @@ namespace Factions.Core
         /// itself, because both reach the fight through the same marshal and it sails at most that
         /// many hulls against one threat.</para>
         ///
-        /// <para>Bounded by the defender's treasury too: the marshal pays
+        /// <para>Bounded by what the defender can pay when it answers: the marshal pays
         /// <see cref="FactionTuning.GuardCost"/> per wave, so a defender that can afford fewer waves
         /// than <see cref="CombatStrength.GuardMaxWaves"/> fields proportionally fewer hulls, and one
-        /// that cannot afford a wave fields none. Its spend-window budget is not read -- it moves
-        /// between now and the raid's detection, and the treasury is the bound that does not. Pact
-        /// partners' Guards are not priced.</para></summary>
+        /// that cannot afford a wave fields none. What it can pay is its treasury plus
+        /// <paramref name="ownerIncomePerPass"/>, one income pass: the raid is answered at contact,
+        /// a transit and an engagement dwell away, so at least one pass lands first, and a faction
+        /// that spends each pass down to nothing reads as broke at most instants and still pays. Its
+        /// spend-window budget is not read. Pact partners' Guards are not priced.</para></summary>
         public static List<string> ProjectedGuardResponse(WorldModel world, FactionTuning tuning,
-            SpatialNode target, DateTime? deadline)
+            SpatialNode target, DateTime? deadline, double ownerIncomePerPass = 0)
         {
             var hulls = new List<string>();
             if (world == null || tuning == null || target == null) return hulls;
@@ -1747,7 +1751,8 @@ namespace Factions.Core
             int maxWaves = CombatStrength.GuardMaxWaves(tuning);
             if (tuning.GuardCost > 0)
             {
-                long affordable = world.GetTreasury(owner) / tuning.GuardCost;
+                double payable = world.GetTreasury(owner) + Math.Max(0.0, ownerIncomePerPass);
+                long affordable = payable <= 0 ? 0 : (long)Math.Min(long.MaxValue / 2, payable / tuning.GuardCost);
                 if (affordable < maxWaves) maxWaves = (int)Math.Max(0, affordable);
             }
             if (maxWaves <= 0) return hulls;

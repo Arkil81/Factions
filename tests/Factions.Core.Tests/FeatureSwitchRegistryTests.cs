@@ -12,12 +12,13 @@ namespace Factions.Core.Tests
         public void TheRegistry_HoldsTheDiagnosticOff_AndTheDeployedSwitchesOn()
         {
             Assert.Equal(new[] { FeatureSwitch.PhysicsPerWorld, FeatureSwitch.StationVoxels, FeatureSwitch.StationLoot,
-                                 FeatureSwitch.FleetTrespass },
+                                 FeatureSwitch.FleetTrespass, FeatureSwitch.LearnedCeiling },
                          FeatureSwitch.Known);
             Assert.False(FeatureSwitch.IsOn(FeatureSwitch.PhysicsPerWorld));
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.StationVoxels));
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.StationLoot));
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.FleetTrespass));
+            Assert.False(FeatureSwitch.IsOn(FeatureSwitch.LearnedCeiling), "before its first deploy");
             Assert.False(FeatureSwitch.Set("rock-shell", true));
             Assert.False(FeatureSwitch.Set("zone-fire", true));
         }

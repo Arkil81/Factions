@@ -304,6 +304,43 @@ namespace Factions.Core.Tests
             Assert.DoesNotContain(log, l => l.Contains("RAID_REFUSED"));
         }
 
+        /// <summary>A defender that spends every income pass down to nothing reads as broke at most
+        /// instants and still pays for the Guard when the raid arrives, because a pass lands first.
+        /// Live 2026-11-21: IGSL's ledger read -49,961 when FCTM's raid on N047 was admitted, its
+        /// income was 1.22 M per pass, and its Guard sailed seven minutes later.</summary>
+        [Fact]
+        public void AnOwnerBrokeNowWhoseNextPassPays_IsPriced()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            origin.ShipStock["Fighter"] = 1;
+            Depot(world, target, offsetKm: 1, hulls: 30);
+            world.Tuning.GuardCost = 100_000;
+            world.SetTreasury("B", -49_961);
+            var owner = new FactionState { Tag = "B", RngSeed = 2, CentralBankRecentIncome = 1_221_293 };
+
+            var log = new List<string>();
+            new FleetManager().Tick(new List<FactionState> { st, owner }, world, world.Tuning, log);
+
+            Assert.Empty(st.PendingFleets);
+            Assert.Contains(log, l => l.StartsWith("A RAID_REFUSED") && l.Contains("responseDps=30000"));
+        }
+
+        /// <summary>The income term is one pass, not a licence: a defender whose treasury plus one
+        /// pass still falls short of a wave prices nothing.</summary>
+        [Fact]
+        public void AnOwnerWhoseNextPassStillFallsShort_IsNotPriced()
+        {
+            SpatialNode origin, target; FactionState st;
+            WorldModel world = Campaign(out origin, out target, out st, defenceDps: 0);
+            Depot(world, target, offsetKm: 1, hulls: 30);
+            world.Tuning.GuardCost = 100_000;
+            world.SetTreasury("B", -49_961);
+
+            Assert.Empty(FleetManager.ProjectedGuardResponse(world, world.Tuning, target, null, 149_960));
+            Assert.NotEmpty(FleetManager.ProjectedGuardResponse(world, world.Tuning, target, null, 149_961));
+        }
+
         /// <summary>The response is bounded by what the marshal can sail against one threat:
         /// <see cref="CombatStrength.FieldableHullCap"/> hulls, however many are parked nearby.</summary>
         [Fact]

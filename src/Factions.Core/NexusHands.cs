@@ -260,6 +260,10 @@ namespace Factions.Core
         public double KCombat = 1.0;
         /// <summary>Its load governor's Factions step; 0 when the governor is not acting.</summary>
         public int FactionsStep;
+        /// <summary>What each prefab it flew was measured to cost there (<see cref="PrefabCostLearner"/>);
+        /// sent once per closed perf window and null in between, so the authority keeps the last list.</summary>
+        [Newtonsoft.Json.JsonProperty(NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore)]
+        public List<PrefabCostLearner.Estimate> PrefabCosts;
     }
 
     /// <summary>
@@ -390,6 +394,9 @@ namespace Factions.Core
         public List<NexusFleetGrid> Grids;
         /// <summary>Fleet keys whose spawn order could not be carried out.</summary>
         public List<string> SpawnFailed;
+        /// <summary>Fleet keys whose spawn is waiting its turn in this agent's spawn queue. The
+        /// authority keeps these alive: a queued spawn is a wait, not an unanswered order.</summary>
+        public List<string> SpawnQueued;
         /// <summary>Recently closed grids that were closed on an order, not shot down.</summary>
         public List<long> Closed;
         /// <summary>Recently gone grids that left at a position another server's sector holds: Nexus
@@ -446,6 +453,7 @@ namespace Factions.Core
                     && (Stations == null || Stations.Count == 0)
                     && (Siege == null || Siege.Count == 0)
                     && (Grids == null || Grids.Count == 0) && (SpawnFailed == null || SpawnFailed.Count == 0)
+                    && (SpawnQueued == null || SpawnQueued.Count == 0)
                     && (Transfers == null || Transfers.Count == 0) && (StoreEvents == null || StoreEvents.Count == 0);
             }
         }

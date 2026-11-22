@@ -187,7 +187,7 @@ namespace Factions.Core.Tests
             KitCatalogue read = KitCatalogue.Parse(json, problems);
             Assert.Empty(problems);
             Assert.Equal(2, read.Kits.Count);
-            Assert.Equal(8, read.Find("starter").Items.Count);
+            Assert.Equal(12, read.Find("starter").Items.Count);
             Assert.Equal(10, read.Find("starter").Items.Find(i => i.SubtypeId == "FullAutoPistolMagazine").Amount);
             Assert.Equal(1, read.Find("sc").RankOrdinal);
         }

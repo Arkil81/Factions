@@ -88,14 +88,16 @@ namespace Factions.Core
         }
 
         /// <summary>Production's kits as the old Kits plugin carried them (<c>Kits.xml</c> on Day and
-        /// Dawn): <c>starter</c> every two hours for everyone, <c>sc</c> every four for Scripter and up.</summary>
+        /// Dawn): <c>starter</c> every two hours for everyone, <c>sc</c> every four for Scripter and up. The starter
+        /// kit has carried 1000 cobalt and 2000 each of iron, nickel and silicon ingots as well since
+        /// 2026-11-21 (operator).</summary>
         public static KitCatalogue Defaults()
         {
             var c = new KitCatalogue();
             c.Kits.Add(new KitDefinition
             {
                 Name = "starter",
-                Description = "A pistol and ten magazines, two medkits, a powerkit, 1000 ice, and tier-2 grinder, welder and drill.",
+                Description = "A pistol and ten magazines, two medkits, a powerkit, 1000 ice, 1000 cobalt ingots, 2000 each of iron, nickel and silicon ingots, and tier-2 grinder, welder and drill.",
                 CooldownMinutes = 120,
                 Items = new List<KitItem>
                 {
@@ -104,6 +106,10 @@ namespace Factions.Core
                     Item("ConsumableItem", "Medkit", 2),
                     Item("ConsumableItem", "Powerkit", 1),
                     Item("Ore", "Ice", 1000),
+                    Item("Ingot", "Cobalt", 1000),
+                    Item("Ingot", "Iron", 2000),
+                    Item("Ingot", "Nickel", 2000),
+                    Item("Ingot", "Silicon", 2000),
                     Item("PhysicalGunObject", "AngleGrinder2Item", 1),
                     Item("PhysicalGunObject", "Welder2Item", 1),
                     Item("PhysicalGunObject", "HandDrill2Item", 1),

@@ -546,13 +546,13 @@ namespace Factions
                 if (e == null || IsStation(e)
                     || string.Equals(e.GridSize, "Station", StringComparison.OrdinalIgnoreCase)) continue;
                 shipsJudged++;
-                if (!ceiling.IsOver(e.BlockCount)) continue;
+                if (!ceiling.IsOver(kv.Key, e.BlockCount)) continue;
                 _overCeiling.Add(kv.Key);
                 excluded.Add(new CeilingExclusion
                 {
                     PrefabId = kv.Key,
                     Blocks = e.BlockCount,
-                    PredictedMs = ceiling.PredictedAwakeMs(e.BlockCount),
+                    PredictedMs = ceiling.PredictedAwakeMs(kv.Key, e.BlockCount),
                 });
             }
             excluded.Sort((a, b) => b.PredictedMs.CompareTo(a.PredictedMs));
@@ -567,8 +567,51 @@ namespace Factions
         {
             if (_ceiling == null || e == null || IsStation(e)
                 || string.Equals(e.GridSize, "Station", StringComparison.OrdinalIgnoreCase)) return;
-            if (_ceiling.IsOver(e.BlockCount)) _overCeiling.Add(prefabId);
+            if (_ceiling.IsOver(prefabId, e.BlockCount)) _overCeiling.Add(prefabId);
             else _overCeiling.Remove(prefabId);
+        }
+
+        /// <summary>One prefab whose side of the ceiling changed on a re-judge.</summary>
+        public struct CeilingChange
+        {
+            public string PrefabId;
+            public bool NowOver;
+            public int Blocks;
+            public double PredictedMs;
+            public double FormulaMs;
+            /// <summary>The learned cost behind the verdict; null when the formula decided.</summary>
+            public PrefabCostLearner.Estimate Learned;
+        }
+
+        /// <summary>Judges every ship prefab again against the ceiling applied at boot, which now
+        /// reads learned costs (<see cref="PrefabCeiling.Learned"/>), and returns what crossed it
+        /// either way. A no-op before <see cref="ApplyPerformanceCeiling"/>.</summary>
+        public List<CeilingChange> RejudgePerformanceCeiling()
+        {
+            var changes = new List<CeilingChange>();
+            PrefabCeiling ceiling = _ceiling;
+            if (ceiling == null) return changes;
+            foreach (KeyValuePair<string, Entry> kv in _entries)
+            {
+                Entry e = kv.Value;
+                if (e == null || IsStation(e)
+                    || string.Equals(e.GridSize, "Station", StringComparison.OrdinalIgnoreCase)) continue;
+                bool over = ceiling.IsOver(kv.Key, e.BlockCount);
+                bool was = _overCeiling.Contains(kv.Key);
+                if (over == was) continue;
+                if (over) _overCeiling.Add(kv.Key); else _overCeiling.Remove(kv.Key);
+                changes.Add(new CeilingChange
+                {
+                    PrefabId = kv.Key,
+                    NowOver = over,
+                    Blocks = e.BlockCount,
+                    PredictedMs = ceiling.PredictedAwakeMs(kv.Key, e.BlockCount),
+                    FormulaMs = ceiling.PredictedAwakeMs(e.BlockCount),
+                    Learned = ceiling.LearnedFor(kv.Key),
+                });
+            }
+            changes.Sort((a, b) => string.Compare(a.PrefabId, b.PrefabId, StringComparison.OrdinalIgnoreCase));
+            return changes;
         }
 
         public bool IsOverPerformanceCeiling(string prefabId)

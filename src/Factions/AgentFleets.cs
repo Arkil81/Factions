@@ -61,6 +61,9 @@ namespace Factions
         {
             public NexusFleetOrder Order;
             public DateTime StartedUtc;
+            /// <summary>Where <see cref="SpawnTimeout"/> counts from: the order, or the last frame it
+            /// was still waiting in the spawn queue. Time spent queued is a wait, not a stall.</summary>
+            public DateTime ClockUtc;
             /// <summary>Withdrawn while its prefab was loading: closed the moment it lands.</summary>
             public bool Withdrawn;
         }
@@ -187,7 +190,7 @@ namespace Factions
                 case NexusFleetOp.Spawn:
                     if (o.Key == null || _spawning.ContainsKey(o.Key)) return;
                     foreach (Held g in _grids.Values) if (g.Key == o.Key) return;
-                    _spawning[o.Key] = new Spawning { Order = o, StartedUtc = nowUtc };
+                    _spawning[o.Key] = new Spawning { Order = o, StartedUtc = nowUtc, ClockUtc = nowUtc };
                     return;
                 case NexusFleetOp.Despawn:
                     Close(o.Eid, nowUtc);
@@ -493,7 +496,8 @@ namespace Factions
                 if (!_spawner.TryTakeSpawn(key, out eid))
                 {
                     if (_spawner.SpawnInFlight(key)) continue;
-                    if (nowUtc - s.StartedUtc >= SpawnTimeout) eid = 0;
+                    if (_spawner.SpawnQueued(key)) s.ClockUtc = nowUtc;
+                    if (nowUtc - s.ClockUtc >= SpawnTimeout) eid = 0;
                     else
                     {
                         eid = _spawner.SpawnOrdered(key, (ActionKind)o.Kind, o.Tag, o.FactionId,
@@ -616,6 +620,9 @@ namespace Factions
                 });
             }
             if (_failed.Count > 0) report.SpawnFailed = new List<string>(_failed.Keys);
+            foreach (KeyValuePair<string, Spawning> kv in _spawning)
+                if (!kv.Value.Withdrawn && _spawner.SpawnQueued(kv.Key))
+                    (report.SpawnQueued ?? (report.SpawnQueued = new List<string>())).Add(kv.Key);
             if (_closed.Count > 0) report.Closed = new List<long>(_closed.Keys);
             if (_handedOff.Count > 0) report.HandedOff = new List<long>(_handedOff.Keys);
         }

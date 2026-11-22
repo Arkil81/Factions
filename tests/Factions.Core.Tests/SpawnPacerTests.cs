@@ -30,6 +30,23 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
+        public void IsWaiting_IsExact_AndEndsAtTheGrantOrAWithdraw()
+        {
+            var p = new SpawnPacer(10.0);
+            Assert.True(Begin(p, "fleet:a", 0));
+            Assert.False(Begin(p, "fleet:ab", 1));
+            Assert.False(Begin(p, "fleet:c", 1));
+            Assert.True(p.IsWaiting("fleet:ab"));
+            Assert.False(p.IsWaiting("fleet:a"));    // in flight, not waiting; and no prefix match
+            Assert.True(p.Withdraw("fleet:c"));
+            Assert.False(p.IsWaiting("fleet:c"));
+            p.Landed("fleet:a", T0.AddSeconds(2));
+            Assert.True(Begin(p, "fleet:ab", 12.1));
+            Assert.False(p.IsWaiting("fleet:ab"));
+            Assert.False(p.IsWaiting(null));
+        }
+
+        [Fact]
         public void ALightLandingKeepsThePlainSpacing()
         {
             var p = new SpawnPacer(1.0);

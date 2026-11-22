@@ -178,6 +178,36 @@ namespace Factions.Core.Tests
             Assert.True(r.IsSpawning("a"));
         }
 
+        /// <summary>2026-11-22 on Main: the agent's pacer held spawns for up to 12 min, and every one
+        /// unanswered past the timeout was given up and re-ordered. A spawn the agent reports queued
+        /// is a wait; the clock restarts from its last such report.</summary>
+        [Fact]
+        public void ASpawnTheAgentReportsQueued_IsNotGivenUp_UntilItStopsSayingSo()
+        {
+            NexusFleetRegistry r = Flying(T0);
+            r.Spawn(Day, SpawnOrder("a"), T0);
+            DateTime t = T0;
+            for (int i = 0; i < 10; i++)
+            {
+                t += TimeSpan.FromSeconds(60);
+                r.Apply(Day, new NexusAgentReport { Session = "s1", Fleets = true, SpawnQueued = new List<string> { "a" } }, t);
+                Assert.Empty(r.Expire(t));
+            }
+            Assert.True(r.IsSpawning("a"));
+            DateTime late = t + NexusFleetRegistry.SpawnTimeout + TimeSpan.FromSeconds(1);
+            r.Apply(Day, "s1", true, null, null, null, 0, late);   // no longer queued, never answered
+            Assert.Contains("a", r.Expire(late));
+        }
+
+        [Fact]
+        public void AQueuedReport_ForAKeyNotSpawning_StartsNothing()
+        {
+            NexusFleetRegistry r = Flying(T0);
+            r.Apply(Day, new NexusAgentReport { Session = "s1", Fleets = true, SpawnQueued = new List<string> { "ghost" } }, T0);
+            Assert.False(r.IsSpawning("ghost"));
+            Assert.Empty(r.Expire(T0 + NexusFleetRegistry.SpawnTimeout + TimeSpan.FromSeconds(1)));
+        }
+
         [Fact]
         public void AnEscortAsk_RidesTheReply_UntilStoppedOrStale()
         {
@@ -542,7 +572,7 @@ namespace Factions.Core.Tests
             {
                 Session = "s1", Fleets = true, OrdersThrough = 9,
                 Grids = new List<NexusFleetGrid> { new NexusFleetGrid { Key = "k", Eid = 5, X = 1.5, ThrustLost = 2 } },
-                SpawnFailed = new List<string> { "f" }, Closed = new List<long> { 4 },
+                SpawnFailed = new List<string> { "f" }, SpawnQueued = new List<string> { "q" }, Closed = new List<long> { 4 },
                 ClockUtc = T0,
                 Munitions = new List<NexusMunitionsTotal> { new NexusMunitionsTotal { Id = "m", Live = true, Out = true } },
             };
@@ -553,6 +583,8 @@ namespace Factions.Core.Tests
             Assert.Equal(1.5, back.Grids[0].X);
             Assert.Equal(2, back.Grids[0].ThrustLost);
             Assert.Equal("f", back.SpawnFailed[0]);
+            Assert.Equal("q", back.SpawnQueued[0]);
+            Assert.False(new NexusAgentReport { SpawnQueued = new List<string> { "q" } }.IsEmpty);
             Assert.Equal(T0, back.ClockUtc.ToUniversalTime());
             Assert.Equal(T0, back.Grids[0].Hit.ToUniversalTime());
             Assert.Equal(0.25, back.Grids[0].Integrity);
