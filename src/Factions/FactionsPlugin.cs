@@ -5574,6 +5574,8 @@ namespace Factions
             LandingProbe.Tick();
             StallWatchdog.Enter("soundEmitters");
             SoundEmitterSweep.Tick();
+            StallWatchdog.Enter("projectorTracker");
+            ProjectorTrackerSweep.Tick();
 
             if (!_sessionReady) return;
             StallWatchdog.Enter("relationTrace");

@@ -49,7 +49,8 @@ namespace Factions
                 + " rockSpawned=" + (rock != null ? rock.LiveObjects.ToString(CultureInfo.InvariantCulture) : "-")
                 + " clipmapsSwept=" + ClipmapWaitSweep.Swept.ToString(CultureInfo.InvariantCulture)
                 + " " + RockRetention.Census()
-                + " " + GridRetention.Census() + " " + SoundEmitterSweep.Census();
+                + " " + GridRetention.Census() + " " + SoundEmitterSweep.Census()
+                + " " + ProjectorTrackerSweep.Census();
         }
 
         private static string Mb(long bytes)
