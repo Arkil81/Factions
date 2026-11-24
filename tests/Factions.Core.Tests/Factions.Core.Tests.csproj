@@ -38,6 +38,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The client radio's per-sample mix. SE-free, and the only place a gain that steps instead of
+         gliding - heard in game as a pop when an antenna turns or a squelch moves - can be measured. -->
+    <Compile Include="..\..\src\FactionsUI\Atc\AtcMixer.cs" LinkBase="FactionsUI" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Factions.Core\Factions.Core.csproj" />
   </ItemGroup>
 
@@ -71,6 +77,12 @@
     <Compile Include="..\..\src\Factions\NameSelector.cs" LinkBase="Factions" />
     <Compile Include="..\..\src\Factions\StationNameCatalogue.cs" LinkBase="Factions" />
     <Compile Include="..\..\src\Factions\TrafficVoiceMap.cs" LinkBase="Factions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The viewer relation rule, by source include. SE-free; it decides the colour every
+         client surface draws a faction in, and is otherwise only observable on a live client. -->
+    <Compile Include="..\..\src\Factions\ViewerRelationRule.cs" LinkBase="Factions" />
   </ItemGroup>
 
   <ItemGroup>

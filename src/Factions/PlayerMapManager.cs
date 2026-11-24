@@ -33,7 +33,7 @@ namespace Factions
         /// subscribed and should not wait out the lazy cadence to see anything.</summary>
         private readonly HashSet<ulong> _owesWorld = new HashSet<ulong>();
 
-        private readonly ViewerRelations _relations = new ViewerRelations();
+        private readonly ViewerRelations _relations = new ViewerRelations("map");
         private readonly PlayerScannerManager _scanner;
         /// <summary>Reused across nodes within one viewer to avoid an allocation per node.</summary>
         private readonly List<FactionKnowledge> _viewerSources = new List<FactionKnowledge>(2);

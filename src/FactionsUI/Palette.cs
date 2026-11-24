@@ -15,6 +15,7 @@ internal static class Palette
             case 1: return new Color(90, 160, 255);    // Own
             case 2: return Color.White;                // Neutral
             case 3: return new Color(230, 60, 60);     // Enemy
+            case 4: return new Color(80, 210, 100);    // Friendly
             default: return Color.Gray;                // Unknown / claimable
         }
     }

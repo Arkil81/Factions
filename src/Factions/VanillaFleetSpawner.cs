@@ -1886,6 +1886,7 @@ namespace Factions
                 }
 
                 MyCubeGrid grid = resultList[0];
+                GridRetention.Track(resultList);
                 bool costTrace = DebugTraces.SpawnCost;
                 long tStep = costTrace ? Stopwatch.GetTimestamp() : 0;
                 var steps = costTrace ? new StringBuilder() : null;

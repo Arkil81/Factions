@@ -910,6 +910,7 @@ internal sealed class MapScreen : MyGuiScreenBase
             case 1: return "own";
             case 2: return "neutral";
             case 3: return "hostile";
+            case 4: return "friendly";
             default: return "unclaimed";
         }
     }

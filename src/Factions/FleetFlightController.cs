@@ -345,6 +345,13 @@ namespace Factions
         /// rather than one per frame.</summary>
         private static readonly TimeSpan EscortRetryInterval = TimeSpan.FromSeconds(5);
 
+        /// <summary>How long a grid waits before an approach may take it again after one was
+        /// aborted on lost braking, or refused because the grid cannot hold itself up. The cruise
+        /// autopilot flies it meanwhile. Without it the abort and the engage alternate every frame:
+        /// the engage gate reads the grid while SE's dampeners hold it still, the abort reads it
+        /// once the takeover has let it sink.</summary>
+        private static readonly TimeSpan ApproachRetryInterval = TimeSpan.FromSeconds(5);
+
         /// <summary>Weapon stats per block definition. SE's definitions do not change in a session,
         /// so each is read once. Game thread only.</summary>
         private static readonly Dictionary<VRage.Game.MyDefinitionId, WeaponBand> WeaponStatsByDefinition
@@ -397,6 +404,7 @@ namespace Factions
         // eid -> earliest UtcNow at which Escort may try to take it again. Written on a refusal and
         // when the controller drops an escort on its own; swept when the grid is gone.
         private readonly Dictionary<long, DateTime> _escortRetryAfter = new Dictionary<long, DateTime>();
+        private readonly RetryGate _approachRetry = new RetryGate(ApproachRetryInterval);
 
         // Escorts whose bubble-cap refusal has been logged, so FLIGHT_CAPPED fires once per hull.
         private readonly HashSet<long> _cappedLogged = new HashSet<long>();
@@ -630,6 +638,8 @@ namespace Factions
                 return true;
             }
 
+            if (kind != ManoeuvreKind.Launch && _approachRetry.Refuses(entityId, DateTime.UtcNow)) return false;
+
             MyCubeGrid grid;
             if (!MyEntities.TryGetEntityById(entityId, out grid, false) || grid.Physics == null) return false;
 
@@ -708,6 +718,24 @@ namespace Factions
             {
                 // Still cruising: vanilla's autopilot (with collision avoidance) owns the long leg.
                 return false;
+            }
+            else
+            {
+                // Read only here, where an approach would otherwise be taken. The braking gate above
+                // read the grid held still by SE's dampeners; once the takeover drops them, a grid
+                // that cannot hold itself up sinks, reads zero braking and is aborted.
+                double liftNow, liftHeld;
+                if (ApproachCannotHoldAltitude(grid, thrust, kind, out liftNow, out liftHeld))
+                {
+                    _approachRetry.Arm(entityId, DateTime.UtcNow);
+                    if (DebugFlight)
+                        Log.Info("FLIGHT_REFUSED eid=" + entityId + " kind=" + kind
+                                 + " reason=cannot_hold_altitude"
+                                 + " liftTwr=" + liftNow.ToString("F2")
+                                 + " levelTwr=" + liftHeld.ToString("F2")
+                                 + " g=" + grid.Physics.Gravity.Length().ToString("F2"));
+                    return false;
+                }
             }
 
             FlightState st = TakeOver(entityId, grid, thrust, gyros, targetWorld, kind);
@@ -1660,12 +1688,14 @@ namespace Factions
                     if (ended.Kind == ManoeuvreKind.Launch && ended.EndReason != null)
                         _launchEndedEarly[_dead[i]] = ended.EndReason;
                     if (ended.IsEscort) _escortRetryAfter[_dead[i]] = nowUtc + EscortRetryInterval;
+                    else if (ended.EndReason == "no_braking") _approachRetry.Arm(_dead[i], nowUtc);
                 }
                 Release(_dead[i]);
             }
 
             PruneLaunchCooldowns();
             PruneEscortRecords();
+            _approachRetry.PruneExpired(nowUtc, 64);
             PruneLaunchEnds();
             PruneLaunchRecords();
             PruneBrakeAuthority();
@@ -1880,6 +1910,7 @@ namespace Factions
             {
                 // Lost the braking estimate mid-approach (power loss, thrusters destroyed). Holding
                 // the grid here would crawl it at the speed floor indefinitely; hand it back instead.
+                st.EndReason = "no_braking";
                 Log.Warn("FLIGHT_ABORT eid=" + st.EntityId + " no braking thrust — returning to cruise autopilot");
                 return false;
             }
@@ -2733,6 +2764,42 @@ namespace Factions
             liftTwr = FlightManoeuvre.LiftTwr(new Vec3(upLocal.X, upLocal.Y, upLocal.Z), axes,
                                               grid.Physics.Mass, gravityMs2);
             return FlightManoeuvre.LaunchCannotHoldAltitude(liftTwr,
+                _tuning != null ? _tuning.LaunchAbortLiftTwr : 1.0);
+        }
+
+        /// <summary>Whether an approach must not take this grid because it cannot hold itself up at
+        /// this gravity, in its current attitude or in the level one the approach flies it in (its
+        /// remote control's up away from the planet, with <see cref="FactionTuning.FlightGravityAlignEnabled"/>).
+        /// False in zero gravity and for a launch.</summary>
+        private bool ApproachCannotHoldAltitude(MyCubeGrid grid, MyEntityThrustComponent thrust, ManoeuvreKind kind,
+                                                out double liftNowTwr, out double liftLevelTwr)
+        {
+            liftNowTwr = liftLevelTwr = double.PositiveInfinity;
+            if (kind == ManoeuvreKind.Launch) return false;
+            Vector3 gravity = grid.Physics.Gravity;
+            double gravityMs2 = gravity.Length();
+            if (gravityMs2 <= 1e-3) return false;
+
+            Matrix toLocal = grid.PositionComp.WorldMatrixNormalizedInv.GetOrientation();
+            AxisThrust axes = AvailableAxisThrust(grid, thrust);
+            float mass = grid.Physics.Mass;
+
+            Vector3 upLocal = Vector3.Transform(-gravity / (float)gravityMs2, ref toLocal);
+            liftNowTwr = FlightManoeuvre.LiftTwr(new Vec3(upLocal.X, upLocal.Y, upLocal.Z), axes, mass, gravityMs2);
+
+            liftLevelTwr = 0;
+            if (_tuning == null || _tuning.FlightGravityAlignEnabled)
+            {
+                MyAutopilotComponent apc = FindAutopilot(grid);
+                MyCubeBlock rc = apc != null ? apc.Entity as MyCubeBlock : null;
+                Vector3 refUp = rc != null && !rc.Closed && rc.CubeGrid == grid
+                    ? (Vector3)rc.PositionComp.WorldMatrixRef.Up
+                    : (Vector3)grid.PositionComp.WorldMatrixRef.Up;
+                Vector3 levelLocal = Vector3.Transform(refUp, ref toLocal);
+                liftLevelTwr = FlightManoeuvre.LiftTwr(new Vec3(levelLocal.X, levelLocal.Y, levelLocal.Z), axes, mass, gravityMs2);
+            }
+
+            return FlightManoeuvre.ApproachCannotHoldAltitude(kind, liftNowTwr, liftLevelTwr,
                 _tuning != null ? _tuning.LaunchAbortLiftTwr : 1.0);
         }
 

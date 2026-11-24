@@ -86,7 +86,8 @@ namespace Factions
             + " | 'factions bench restore <gridEntityId|looking> [confirm]'"
             + " | 'factions bench phantom add|clear|list ...' (stand-in players; 'factions bench phantom help' for its usage)"
             + " | 'factions bench gc' (blocking full collection; heap before/after with entity and voxel counts)"
-            + " | 'factions bench roots' (static-field paths that still reach closed voxel maps; seconds on the game thread)";
+            + " | 'factions bench roots [depth=N] [all=1]' (static-field paths that still reach closed voxel maps and grids; seconds on the game thread)"
+            + " | 'factions bench dump [path]' (full collection, then a full memory dump from a process snapshot, written in the background)";
 
         internal static string Handle(string[] t)
         {
@@ -108,7 +109,8 @@ namespace Factions
                 case "phantom": return BenchPhantoms.Handle(t);
                 case "rock": return BenchRocks.Handle(t);
                 case "gc": return BenchGc.Run();
-                case "roots": return BenchRoots.Run();
+                case "roots": return BenchRoots.Run(t);
+                case "dump": return BenchDump.Run(t);
                 case "motion": return Motion(t);
                 case "rc":    return t.Length > 3 ? Rc(t[3]) : Usage;
                 case "clear": return Clear(t.Length > 3 ? t[3] : null);

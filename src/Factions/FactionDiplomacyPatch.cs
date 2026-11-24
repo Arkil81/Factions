@@ -117,9 +117,23 @@ namespace Factions
             MySession.Static.Factions.SetReputationBetweenFactions(toFactionId, fromFactionId, rep);
         }
 
-        private static readonly AccessTools.FieldRef<MyFactionCollection,
+        /// <summary>SE's faction-relation table; null if the field did not resolve. Also read by
+        /// <see cref="HasRelationRow"/>.</summary>
+        internal static readonly AccessTools.FieldRef<MyFactionCollection,
             Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>>> RelationTable =
             TryRelationTable();
+
+        /// <summary>Whether SE's relation table holds a row for the pair (the table's comparer is
+        /// order-insensitive); null when the table cannot be read. <c>GetRelationBetweenFactions</c>
+        /// cannot tell: it answers a missing row with the session default, Enemies.</summary>
+        internal static bool? HasRelationRow(MyFactionCollection factions, long a, long b)
+        {
+            if (factions == null || RelationTable == null) return null;
+            Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>> table =
+                RelationTable(factions);
+            if (table == null) return null;
+            return table.ContainsKey(new MyFactionCollection.MyRelatablePair(a, b));
+        }
 
         private static AccessTools.FieldRef<MyFactionCollection,
             Dictionary<MyFactionCollection.MyRelatablePair, Tuple<MyRelationsBetweenFactions, int>>> TryRelationTable()

@@ -14,13 +14,16 @@ namespace Factions
     /// <summary>
     /// <c>factions bench roots</c>: walks the object graph from every static field of the game, engine, Torch and
     /// plugin assemblies, a few hops deep through fields, collections and delegates, and reports the paths that
-    /// reach a voxel map that has already closed. A closed voxel map is garbage unless something rooted holds it,
-    /// so any path found is the holder. Bounded by depth and by objects visited; a test-server diagnostic that
-    /// takes seconds on the game thread.
+    /// reach a voxel map or a cube grid that has already closed. A closed entity is garbage unless something rooted
+    /// holds it, so any path found is the holder. <c>depth=N</c> (1-10, default 4) sets the hop limit and
+    /// <c>all=1</c> walks every loaded assembly except the framework's. Bounded by depth, objects visited and
+    /// time; a test-server diagnostic that takes seconds on the game thread. GC handles and stacks are not walked:
+    /// a holder only they reach shows up in <c>factions bench dump</c>, not here.
     /// </summary>
     internal static class BenchRoots
     {
-        private const int MaxDepth = 4;
+        private const int DefaultDepth = 4;
+        private static int _maxDepth = DefaultDepth;
         private const int MaxObjects = 1500000;
         private const double MaxSeconds = 20.0;
         private static long _deadline;
@@ -34,14 +37,27 @@ namespace Factions
 
         private static HashSet<object> _seen;
         private static Dictionary<string, int> _hits;
+        private static Dictionary<string, int> _gridHits;
         private static int _visited;
         private static readonly Dictionary<Type, FieldInfo[]> FieldCache = new Dictionary<Type, FieldInfo[]>();
 
-        internal static string Run()
+        internal static string Run(string[] args)
         {
+            _maxDepth = DefaultDepth;
+            bool all = false;
+            for (int i = 3; args != null && i < args.Length; i++)
+            {
+                string a = args[i].ToLowerInvariant();
+                int d;
+                if (a.StartsWith("depth=", StringComparison.Ordinal)
+                    && int.TryParse(a.Substring(6), NumberStyles.Integer, CultureInfo.InvariantCulture, out d))
+                    _maxDepth = Math.Max(1, Math.Min(10, d));
+                else if (a == "all=1") all = true;
+            }
             long t0 = Stopwatch.GetTimestamp();
             _seen = new HashSet<object>(new RefEq());
             _hits = new Dictionary<string, int>(StringComparer.Ordinal);
+            _gridHits = new Dictionary<string, int>(StringComparer.Ordinal);
             _visited = 0;
             _deadline = t0 + (long)(MaxSeconds * Stopwatch.Frequency);
             int statics = 0;
@@ -50,7 +66,7 @@ namespace Factions
                 foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
                 {
                     string n = asm.GetName().Name;
-                    if (!(n.StartsWith("Sandbox", StringComparison.Ordinal) || n.StartsWith("VRage", StringComparison.Ordinal)
+                    if (all ? IsFramework(n) : !(n.StartsWith("Sandbox", StringComparison.Ordinal) || n.StartsWith("VRage", StringComparison.Ordinal)
                           || n.StartsWith("SpaceEngineers", StringComparison.Ordinal) || n.StartsWith("Torch", StringComparison.Ordinal)
                           || n.StartsWith("Factions", StringComparison.Ordinal) || n.StartsWith("0Harmony", StringComparison.Ordinal)))
                         continue;
@@ -86,8 +102,12 @@ namespace Factions
             double ms = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
             var sb = new StringBuilder("bench roots: statics=").Append(statics).Append(" visited=").Append(_visited)
                 .Append(_visited >= MaxObjects ? " (capped by objects or time; partial)" : "").Append(" ms=").Append(ms.ToString("0", CultureInfo.InvariantCulture))
+                .Append(" depth=").Append(_maxDepth).Append(all ? " all" : "")
                 .Append(" closedVoxelPaths=").Append(_hits.Count);
             foreach (KeyValuePair<string, int> kv in _hits.OrderByDescending(k => k.Value).Take(12))
+                sb.Append(" | ").Append(kv.Key).Append('=').Append(kv.Value);
+            sb.Append(" || closedGridPaths=").Append(_gridHits.Count);
+            foreach (KeyValuePair<string, int> kv in _gridHits.OrderByDescending(k => k.Value).Take(12))
                 sb.Append(" | ").Append(kv.Key).Append('=').Append(kv.Value);
             _seen = null;
             return sb.ToString();
@@ -112,9 +132,20 @@ namespace Factions
                 }
                 return;   // an open voxel is legitimately held; its own fields are not the question
             }
+            var grid = v as MyCubeGrid;
+            if (grid != null)
+            {
+                if (grid.Closed)
+                {
+                    int c;
+                    _gridHits.TryGetValue(path, out c);
+                    _gridHits[path] = c + 1;
+                }
+                return;   // an open grid is legitimately held
+            }
             if (!t.IsValueType && !_seen.Add(v)) return;
             _visited++;
-            if (depth >= MaxDepth) return;
+            if (depth >= _maxDepth) return;
 
             var del = v as Delegate;
             if (del != null)
@@ -157,6 +188,12 @@ namespace Factions
                 try { fv = f.GetValue(v); } catch { continue; }
                 if (fv != null) Visit(fv, path + "." + f.Name, depth + 1);
             }
+        }
+
+        private static bool IsFramework(string name)
+        {
+            return name == "mscorlib" || name == "netstandard" || name.StartsWith("System", StringComparison.Ordinal)
+                || name.StartsWith("Microsoft", StringComparison.Ordinal);
         }
 
         private static readonly Dictionary<Type, PropertyInfo[]> KvCache = new Dictionary<Type, PropertyInfo[]>();

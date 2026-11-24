@@ -22,7 +22,8 @@ namespace FactionsUI.Atc;
 /// What does not depend on where the listener's antennas point is prepared on a worker thread
 /// (<see cref="Prepare"/>). The rest -- the signal-to-noise, which moves with the reflectors' gain
 /// toward the pilot and with distance, and the squelch it opens -- is mixed on the game thread in
-/// short chunks as the call plays (<see cref="AtcPilotLine"/>), so a listener aims by ear.
+/// short chunks as the call plays (<see cref="AtcPilotLine"/>, <see cref="AtcMixer.Pilot"/>), so a
+/// listener aims by ear.
 /// </summary>
 internal static class AtcPilot
 {
@@ -49,18 +50,10 @@ internal static class AtcPilot
         return (AtcLibrary.Get(keys[rng.Next(keys.Length)]), AtcLibrary.Get("fx.static"));
     }
 
-    internal static float[] ToFloat(byte[] pcm)
-    {
-        var f = new float[pcm.Length / 2];
-        for (int i = 0; i < f.Length; i++) f[i] = (short)(pcm[2 * i] | (pcm[2 * i + 1] << 8)) / 32768f;
-        return f;
-    }
-
     // ---- the physics, off the game thread ---------------------------------------------------------
 
     /// <summary>Reference level of a controller line (the phrase clips' median RMS, -19.4 dBFS).</summary>
     private const double ControllerRms = 0.107;
-    private const double MaxNoiseOverVoiceDb = 6.0;
 
     internal static Prepared Prepare(float[] src, float[] staticLoop, WireTrafficPilotCall c, int seed)
     {
@@ -70,7 +63,7 @@ internal static class AtcPilot
         if (c.CutoffHz < 3350) { x = LowPass(x, c.CutoffHz); x = LowPass(x, c.CutoffHz); }
         float[] env = Fading(n, c.FlutterHz, c.Reflections / 255.0, rng);
 
-        // AGC: the voice stays at LevelDb whatever the path; the static rises as the SNR falls (Mix).
+        // AGC: the voice stays at LevelDb whatever the path; the static rises as the SNR falls (AtcMixer.Pilot).
         // Modelling the voice itself falling 6 dB per doubling, as the tuning bench did, put a 2 km call
         // 16 dB under the controller: inaudible in game (2026-09-29).
         double sigRms = ControllerRms * Math.Pow(10, c.LevelDb / 20.0);
@@ -85,27 +78,6 @@ internal static class AtcPilot
             p.Static[i] = (float)(staticLoop[(off + i) % staticLoop.Length] * gn);
         }
         return p;
-    }
-
-    /// <summary>Mixes samples [from, from+count) at this signal-to-noise into 16-bit PCM. The static is
-    /// never allowed above the voice by more than <see cref="MaxNoiseOverVoiceDb"/> (past that the squelch
-    /// has closed anyway). <paramref name="open"/> carries the squelch gate across chunks.</summary>
-    internal static byte[] Mix(Prepared p, int from, int count, double snrDb, double squelchDb, ref float open)
-    {
-        double gn = Math.Pow(10, -Math.Max(snrDb, -MaxNoiseOverVoiceDb) / 20.0);
-        int ramp = Rate * 5 / 1000;
-        var pcm = new byte[count * 2];
-        for (int k = 0; k < count; k++)
-        {
-            int i = from + k;
-            float target = snrDb + p.FadeDb[i] >= squelchDb ? 1f : 0f;
-            open += (target - open) / ramp;
-            float s = Math.Max(-1f, Math.Min(1f, open * (float)(p.Signal[i] + p.Static[i] * gn)));
-            short q = (short)(s * 32767);
-            pcm[2 * k] = (byte)q;
-            pcm[2 * k + 1] = (byte)(q >> 8);
-        }
-        return pcm;
     }
 
     private const int HilbertM = 63;

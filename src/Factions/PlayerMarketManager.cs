@@ -46,7 +46,7 @@ namespace Factions
 
         private readonly HashSet<ulong> _streaming = new HashSet<ulong>();
         private readonly HashSet<ulong> _owesSend = new HashSet<ulong>();
-        private readonly ViewerRelations _relations = new ViewerRelations();
+        private readonly ViewerRelations _relations = new ViewerRelations("market");
         private readonly PlayerMarketWorld _world = new PlayerMarketWorld();
         private readonly List<FactionKnowledge> _viewerSources = new List<FactionKnowledge>(2);
         private readonly List<long> _viewerObservers = new List<long>(2);

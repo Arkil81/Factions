@@ -533,6 +533,21 @@ namespace Factions.Core
             return kind != ManoeuvreKind.Launch && planningDecelMs2 <= 0;
         }
 
+        /// <summary>Whether an approach must not take a grid in gravity because the grid cannot hold
+        /// itself up in either attitude it may fly: the one it has now, or the one the manoeuvre
+        /// levels it into. Below that line every descent reads zero braking
+        /// (<see cref="BrakingDecelMs2"/>), so an engaged approach is aborted as soon as the
+        /// released dampeners let the grid sink, and the grid is engaged again once they have
+        /// stopped it. A launch is never refused here; it is checked per tick on
+        /// <see cref="LaunchCannotHoldAltitude"/>.</summary>
+        public static bool ApproachCannotHoldAltitude(ManoeuvreKind kind, double liftNowTwr,
+                                                      double liftHeldTwr, double minLiftTwr)
+        {
+            if (kind == ManoeuvreKind.Launch) return false;
+            double best = liftNowTwr > liftHeldTwr ? liftNowTwr : liftHeldTwr;
+            return LaunchCannotHoldAltitude(best, minLiftTwr);
+        }
+
         /// <summary>Thrust-to-weight the grid can apply straight up in its current attitude.
         /// <paramref name="upLocal"/> is world up in grid-local coordinates (X right, Y up, Z backward).
         /// The best a grid can push along a direction is each local axis's thrust on the side facing

@@ -794,6 +794,37 @@ namespace Factions.Core.Tests
             Assert.False(FlightManoeuvre.AbortsOnLostBraking(ManoeuvreKind.ApproachAndStop, 0.5));
         }
 
+        // ---- an approach refuses a grid that cannot hold itself up ----------------------------
+
+        /// <summary>The production case: a METC MiniMerchant launched at 1 g read 0.93 and sank.
+        /// An approach taken on it is aborted the first time it descends, so it is not taken.</summary>
+        [Fact]
+        public void ApproachCannotHoldAltitude_RefusesAHullUnderOneTwrInBothAttitudes()
+        {
+            Assert.True(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, 0.93, 0.93, 1.0));
+            Assert.True(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, 0.0, 0.79, 1.0));
+        }
+
+        /// <summary>Alsvidr pitched nose-up reads 0.76 but holds at 1.61 in the level attitude the
+        /// approach flies it in; only a hull that holds in neither is refused.</summary>
+        [Fact]
+        public void ApproachCannotHoldAltitude_TakesAHullThatHoldsInTheLevelledAttitude()
+        {
+            double now = FlightManoeuvre.LiftTwr(new Vec3(0, 0, -1), Alsvidr(), AlsvidrKg, G1);
+            double held = FlightManoeuvre.LiftTwr(new Vec3(0, 0, 1), Alsvidr(), AlsvidrKg, G1);
+            Assert.False(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, now, held, 1.0));
+            Assert.False(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, held, now, 1.0));
+        }
+
+        [Fact]
+        public void ApproachCannotHoldAltitude_NeverRefusesALaunch_OrInZeroGravity_OrSwitchedOff()
+        {
+            Assert.False(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.Launch, 0.0, 0.0, 1.0));
+            double inf = double.PositiveInfinity;
+            Assert.False(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, inf, inf, 1.0));
+            Assert.False(FlightManoeuvre.ApproachCannotHoldAltitude(ManoeuvreKind.ApproachAndStop, 0.5, 0.5, 0.0));
+        }
+
         // ---- launch gate for a grid no manoeuvre has held yet (FAC-337) ------------------------
 
         private const double FirstEngageMs = 10.0;

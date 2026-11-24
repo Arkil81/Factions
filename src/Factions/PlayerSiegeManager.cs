@@ -97,7 +97,7 @@ namespace Factions
         private readonly HashSet<long> _holders = new HashSet<long>();
         // Nodes the materialised pass maintained this tick, so the unobserved sweep skips them.
         private readonly HashSet<string> _maintained = new HashSet<string>(StringComparer.Ordinal);
-        private readonly ViewerRelations _relations = new ViewerRelations();
+        private readonly ViewerRelations _relations = new ViewerRelations("siege");
 
         private HitInterceptor _interceptor;
         private bool _registered;

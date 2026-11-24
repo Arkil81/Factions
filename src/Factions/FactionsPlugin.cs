@@ -215,6 +215,7 @@ namespace Factions
         {
             base.Init(torch);
             Instance = this;
+            StallWatchdog.Start();
 
             InstanceDir = Path.Combine(StoragePath, PluginName);
             Directory.CreateDirectory(InstanceDir);
@@ -338,6 +339,8 @@ namespace Factions
         private void OnSessionStateChanged(ITorchSession session, TorchSessionState state)
         {
             _sessionReady = state == TorchSessionState.Loaded;
+            if (state == TorchSessionState.Loaded) StallWatchdog.Arm();
+            else StallWatchdog.Disarm();
             if (state == TorchSessionState.Loaded)
             {
                 // Load tuning.json first so operator knobs override code defaults.
@@ -3367,11 +3370,14 @@ namespace Factions
         private void TickAgent()
         {
             if (_uplinkManager == null || _nexusRelay == null) return;
+            StallWatchdog.Enter("agent.relay");
             _nexusRelay.Drain(_uplinkManager.OnRelayInbound, 256);
             _relayTick++;
+            StallWatchdog.Enter("agent.chatCapturesKits");
             if (_chatCommands != null && _relayTick % AgentPruneTicks == 0) _chatCommands.Tick(DateTime.UtcNow);
             if (_agentCaptures != null && _relayTick % AgentPruneTicks == 0) _agentCaptures.Tick(DateTime.UtcNow);
             if (_kits != null && _relayTick % AgentPruneTicks == 0) _kits.Tick(DateTime.UtcNow);
+            StallWatchdog.Enter("agent.wing");
             if (_agentWing != null)
             {
                 try { _agentWing.Tick(DateTime.UtcNow); }
@@ -3379,9 +3385,12 @@ namespace Factions
             }
             if (_agentHands != null)
             {
+                StallWatchdog.Enter("agent.captures");
                 SwapAgentCaptures();
+                StallWatchdog.Enter("agent.shipAssets");
                 try { _agentShipAssets?.Tick(); }
                 catch (Exception ex) { Log.Warn(ex, "Agent ship assets tick failed."); }
+                StallWatchdog.Enter("agent.restoration");
                 try { _agentRestorationRefs?.Pump(); _agentRestoration?.Pump(); }
                 catch (Exception ex) { Log.Warn(ex, "Agent restoration pump failed."); }
                 // The per-frame halves of what the materialisers start, run on the authority by
@@ -3392,17 +3401,25 @@ namespace Factions
                 // all go through its paced queue.
                 try
                 {
+                    StallWatchdog.Enter("agent.spawnPacing");
                     SpawnPacing.TickFrame();
+                    StallWatchdog.Enter("agent.assembler");
                     GridAssembler.Instance.Tick();
+                    StallWatchdog.Enter("agent.gridAssembly");
                     GridAssembly.Tick();
+                    StallWatchdog.Enter("agent.rockContact");
                     RockContactPhysics.Tick();
+                    StallWatchdog.Enter("agent.clipmap");
                     ClipmapWaitSweep.Tick();
+                    StallWatchdog.Enter("agent.stationQuiet");
                     StationQuiet.Tick(_agentHands.Stations, _tuning);
+                    StallWatchdog.Enter("agent.econSlicer");
                     EconomyTickSlicer.Tick();
                 }
                 catch (Exception ex) { Log.Warn(ex, "Agent frame helpers failed."); }
                 if (_relayTick % GpsUpdateTicks == 0)
                 {
+                    StallWatchdog.Enter("agent.emissions");
                     try { SampleGridEmissions(); _agentContactsSampled = true; }
                     catch (Exception ex) { Log.Warn(ex, "Player excitation sample failed."); }
                 }
@@ -3411,28 +3428,34 @@ namespace Factions
             {
                 try
                 {
+                    StallWatchdog.Enter("agent.materialise");
                     RefreshPlayerPositionCache();
                     RefreshPlayerPositionsKm();
                     _agentHands.Tick(_playerPositionsKm);
                 }
                 catch (Exception ex) { Log.Warn(ex, "Agent materialisation failed."); }
+                StallWatchdog.Enter("agent.reaper");
                 try { _gridReaper?.Tick(); }
                 catch (Exception ex) { Log.Warn(ex, "Grid reaper tick failed."); }
+                StallWatchdog.Enter("agent.debris");
                 try { _agentDebris?.Tick(); }
                 catch (Exception ex) { Log.Warn(ex, "Debris absorb tick failed."); }
             }
             if (_relayTick % AgentPositionTicks == 0)
             {
+                StallWatchdog.Enter("agent.report");
                 try { SendPlayerPositions(); SendAgentReport(); }
                 catch (Exception ex) { Log.Warn(ex, "Player position report failed."); }
             }
             if (_relayTick % AgentPruneTicks == 0)
             {
+                StallWatchdog.Enter("agent.pruneUplinks");
                 try { PruneUplinks(); }
                 catch (Exception ex) { Log.Warn(ex, "Uplink prune failed."); }
             }
             if (_relayTick % AgentLivenessTicks == 0)
             {
+                StallWatchdog.Enter("agent.liveness");
                 bool? online = _nexusRelay.IsServerOnline((byte)_tuning.NexusAuthorityServerId);
                 bool now = online == true;
                 if (now && !_authorityOnline)
@@ -5512,6 +5535,15 @@ namespace Factions
 
         public override void Update()
         {
+            try { UpdateFrame(); }
+            finally { StallWatchdog.Enter(StallWatch.Outside); }
+        }
+
+        /// <summary>The plugin's frame. Each part names itself to <see cref="StallWatchdog"/> as it starts;
+        /// <see cref="Update"/> marks the frame's end.</summary>
+        private void UpdateFrame()
+        {
+            StallWatchdog.Enter("base");
             ProbeFrameGap(Stopwatch.GetTimestamp());
 
             // base.Update is recorded for correlation, but excluded from the Factions-owned frame
@@ -5527,19 +5559,28 @@ namespace Factions
             // worth having. Sits outside the frame span measured into `_perfFrame`, so the one part
             // of it that costs real time -- the entity walk -- reports itself as `censusMs` rather
             // than hiding in the gap.
+            StallWatchdog.Enter("serverPerf");
             TickServerPerf();
             AllocProbe.End("pre.serverPerf", pre); pre = AllocProbe.Begin();
+            StallWatchdog.Enter("bench");
             BenchSpawner.Tick();
             BenchPhantoms.Tick();
             AllocProbe.End("pre.bench", pre); pre = AllocProbe.Begin();
+            StallWatchdog.Enter("crew");
             CrewPresence.Tick();
             AllocProbe.End("pre.crew", pre);
+            StallWatchdog.Enter("probes");
             DampenerProbe.Tick();
             LandingProbe.Tick();
+            StallWatchdog.Enter("soundEmitters");
+            SoundEmitterSweep.Tick();
 
             if (!_sessionReady) return;
+            StallWatchdog.Enter("relationTrace");
+            RelationTrace.Tick(DateTime.UtcNow);
             if (_simulationDeferred)
             {
+                StallWatchdog.Enter("bridge");
                 if (++_tick % BridgePollTicks == 0) ProcessBridgeInbox();
                 if (_nexusRole == NexusRole.Agent)
                 {
@@ -5550,6 +5591,7 @@ namespace Factions
                 return;
             }
             pre = AllocProbe.Begin();
+            StallWatchdog.Enter("relay");
             try { DrainRelayAsAuthority(); }
             catch (Exception ex) { Log.Warn(ex, "Relay drain failed."); }
             AllocProbe.End("pre.relay", pre);
@@ -5572,6 +5614,7 @@ namespace Factions
             try
             {
                 long actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                StallWatchdog.Enter("playerCache");
                 RefreshPlayerPositionCache();   // cache once; used by UpdateObservation + UpdateStationObservation
                 RefreshPlayerPositionsKm();     // ...and by every scan that queries outward from the players
                 playerCacheTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("playerCache");
@@ -5581,6 +5624,7 @@ namespace Factions
                     try
                     {
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("runtime");
                         try { runtime.OnUpdateFrame(new FrameDeadline(frameStart, runtime.GetFrameSoftBudgetMilliseconds())); }   // current whole cycles remain due/unsafe until bounded cursors land
                         finally { runtimeTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("runtime"); }
 
@@ -5588,34 +5632,41 @@ namespace Factions
                         // `flight` bucket, because it cannot move onto the coarser interval the
                         // observation scan is destined for.
                         long mid = AllocProbe.Begin();
+                        StallWatchdog.Enter("fleetFlight");
                         runtime.TickFleetFlight();
                         AllocProbe.End("fleetFlight", mid); mid = AllocProbe.Begin();
 
                         // Running restorations at Services Terminals: a count check when none runs.
+                        StallWatchdog.Enter("restoration");
                         try { _restorationService?.Pump(); }
                         catch (Exception ex) { Log.Warn(ex, "Restoration pump failed."); }
                         AllocProbe.End("restoration", mid);
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("fleetObservation");
                         try { runtime.UpdateObservation(AnyPlayerOrFlownWithinKm, PlayersWithinKm, _playerPositionsKm.Count + FlownRemoteCount()); }
                         finally { fleetObservationTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("fleetObservation"); }
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("stationObservation");
                         try { runtime.UpdateStationObservation(_playerPositionsKm, _tuning.ObservationRadiusKm); }
                         finally { stationObservationTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("stationObservation"); }
 
                         // Immediately after station observation: a siege only means anything for a
                         // materialised station, and this is the tick that has just decided which
                         // those are.
+                        StallWatchdog.Enter("siege");
                         runtime.TickPlayerSiege(AnyPlayerOrRemoteWithinKm);
 
                         // Coarse cadence (see FactionRuntime._unknPruneNextUtc) -- most calls return
                         // immediately without touching the graph, so no dedicated perf counter here.
+                        StallWatchdog.Enter("unknPrune");
                         runtime.PruneExpiredUnknTerritory(pos => AnyPlayerWithinKm(pos, _tuning.ObservationRadiusKm));
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
                         try
                         {
+                            StallWatchdog.Enter("asteroids");
                             long am = AllocProbe.Begin();
                             runtime.UpdateAsteroidFieldObservation(_playerPositionsKm, _tuning.ObservationRadiusKm);
                             AllocProbe.End("ast.fields", am); am = AllocProbe.Begin();
@@ -5634,24 +5685,30 @@ namespace Factions
                         // A withdrawal's staged clone needs a frame or more before SE has attached
                         // its subgrids and the blueprint can be copied whole. Returns at once while
                         // none is staged, which is nearly every frame.
+                        StallWatchdog.Enter("shipAssets");
                         try { _playerShipAssetsManager?.Tick(); }
                         catch (Exception shipEx) { Log.Warn(shipEx, "Player ship assets tick failed."); }
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("price");
                         try { _priceUpdater?.Tick(DateTime.UtcNow); }
                         finally { priceTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("price"); }
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("planet");
                         try { _planetSnapshotWriter?.Tick(DateTime.UtcNow); }
                         finally { planetTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("planet"); }
 
                         long tail = AllocProbe.Begin();
+                        StallWatchdog.Enter("reputation");
                         try { _reputationManager?.Tick(DateTime.UtcNow); }
                         catch (Exception ex) { Log.Warn(ex, "Reputation ledger tick failed."); }
                         AllocProbe.End("reputation", tail); tail = AllocProbe.Begin();
+                        StallWatchdog.Enter("playerIndex");
                         try { _playerIndexWriter?.Tick(DateTime.UtcNow); }
                         catch (Exception ex) { Log.Warn(ex, "Player index tick failed."); }
                         AllocProbe.End("playerIndex", tail); tail = AllocProbe.Begin();
+                        StallWatchdog.Enter("deposits");
                         try { runtime.UpdateDepositBackfill(); }
                         catch (Exception ex) { Log.Warn(ex, "Deposit backfill failed."); }
                         try { runtime.UpdateDepositSurvey(); }
@@ -5665,6 +5722,7 @@ namespace Factions
 
                 if (++_tick % BridgePollTicks == 0)
                 {
+                    StallWatchdog.Enter("bridge");
                     actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
                     ProcessBridgeInbox();
                     bridgeTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("bridge");
@@ -5672,6 +5730,7 @@ namespace Factions
                 if (++_gpsTick % GpsUpdateTicks == 0)
                 {
                     actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                    StallWatchdog.Enter("presence");
                     try { _presenceManager?.Refresh(); }
                     catch (Exception ex) { Log.Warn(ex, "Presence refresh failed."); }
                     try { _conquerOfferManager?.Tick(_runtime.SiegeAttackerFor); }
@@ -5685,14 +5744,17 @@ namespace Factions
                     if (VanillaFleetSpawner.AnyDebugEnabled)
                     {
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                        StallWatchdog.Enter("gps");
                         BroadcastFleetGps();
                         gpsTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("gps");
                     }
                     actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
+                    StallWatchdog.Enter("emissions");
                     try { SampleGridEmissions(); }
                     catch (Exception ex) { Log.Warn(ex, "Player excitation sample failed."); }
                     try { TickTrespassHails(); }
                     catch (Exception ex) { Log.Warn(ex, "Trespass hail tick failed."); }
+                    StallWatchdog.Enter("playerManagers");
                     try { _playerScannerManager?.Tick(); }
                     catch (Exception ex) { Log.Warn(ex, "Player scanner tick failed."); }
                     try { _playerMarketManager?.Tick(); }
@@ -5726,8 +5788,10 @@ namespace Factions
                     catch (Exception ex) { Log.Warn(ex, "Player faction demand tick failed."); }
                     try { PruneUplinks(); }
                     catch (Exception ex) { Log.Warn(ex, "Uplink prune failed."); }
+                    StallWatchdog.Enter("debris");
                     try { _debrisAbsorbManager?.Tick(); }
                     catch (Exception ex) { Log.Warn(ex, "Debris absorb tick failed."); }
+                    StallWatchdog.Enter("reaper");
                     try { _gridReaper?.Tick(); }
                     catch (Exception ex) { Log.Warn(ex, "Grid reaper tick failed."); }
                     try { TickFightDebris(); }
@@ -5737,6 +5801,7 @@ namespace Factions
                 actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
                 try
                 {
+                    StallWatchdog.Enter("store");
                     if (++_storeTick % _storeRefreshTicks == 0) _storeManager?.BeginRefreshPass();
                     _storeManager?.RefreshPassStep(StoreRefreshBudgetMs * StallBackoffScale.Value);
                 }
@@ -6783,7 +6848,7 @@ namespace Factions
                 + "Re-enable with 'factions debug <kind>': trade, raid, guard, patrol, ferry, uplink, "
                 + "sense, flight, footing, rock, rockwire, store, reputation, repsync, frame, survey, fauna, "
                 + "produced, itemxfer, upkeep, itemdemand, shipevents, investment, bankdenials, "
-                + "braindecisions, slots, grids, fuel, munitions, contracts, econtick, tactics, landing, trespass. A trace you expected and do not see is this, not a fault."
+                + "braindecisions, slots, grids, fuel, munitions, contracts, econtick, tactics, landing, trespass, relation. A trace you expected and do not see is this, not a fault."
                 : "Debug traces ON: " + string.Join(", ", on.ToArray())
                 + " (per-process; cleared by the next reload).");
         }
@@ -9166,6 +9231,7 @@ namespace Factions
 
         public override void Dispose()
         {
+            StallWatchdog.Stop();
             StopRuntime();
             // Before UnpatchAll: the physics postfix accumulates into static state this reads, and
             // the publisher owns a background thread that must be asked to drain.

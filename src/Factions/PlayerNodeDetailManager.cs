@@ -39,7 +39,7 @@ namespace Factions
         /// node, or ran a command whose effect they should see without waiting out the cadence.</summary>
         private readonly HashSet<ulong> _owesSnapshot = new HashSet<ulong>();
 
-        private readonly ViewerRelations _relations = new ViewerRelations();
+        private readonly ViewerRelations _relations = new ViewerRelations("nodedetail");
         private readonly PlayerScannerManager _scanner;
         /// <summary>Read per snapshot rather than held: the store manager is built after this one.</summary>
         private readonly Func<StationStoreManager> _store;

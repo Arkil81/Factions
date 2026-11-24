@@ -76,7 +76,7 @@ namespace Factions
                 long identityId = player.Identity.IdentityId;
                 PlayerScannerState state;
                 if (!_states.TryGetValue(identityId, out state)) return;
-                ClearState(identityId, state);
+                ClearState(identityId, state, "link");
                 return;
             }
         }
@@ -101,7 +101,7 @@ namespace Factions
                     : null;
                 if (level < 1)
                 {
-                    ClearState(identityId, state);
+                    ClearState(identityId, state, "no-level");
                     state.ActiveGridEntityId = 0;
                     state.HasGridSensor = false;
                     SendResetIfLinked(player.Id.SteamId, state);
@@ -123,6 +123,7 @@ namespace Factions
                     {
                         state.Tracker.Clear();
                         state.OwesClientReset = true;
+                        state.ResetReason = "unseated";
                         SendResetIfLinked(player.Id.SteamId, state);
                     }
                     continue;
@@ -142,7 +143,7 @@ namespace Factions
                 if (!online.Contains(pair.Key)) stale.Add(pair.Key);
             foreach (long identityId in stale)
             {
-                ClearState(identityId, _states[identityId]);
+                ClearState(identityId, _states[identityId], "offline");
                 _states.Remove(identityId);
             }
             _profiles.SaveIfDirty();
@@ -167,6 +168,7 @@ namespace Factions
                 state.Tracker.Clear();
                 state.Tokens.Clear();
                 state.OwesClientReset = true;
+                state.ResetReason = "grid-switch";
             }
             state.ActiveGridEntityId = gridEntityId;
 
@@ -227,7 +229,7 @@ namespace Factions
                 int level = _profiles.GetLevel(p.SteamId.ToString());
                 if (level < 1)
                 {
-                    ClearState(p.IdentityId, state);
+                    ClearState(p.IdentityId, state, "no-level");
                     state.ActiveGridEntityId = 0;
                     state.HasGridSensor = false;
                     SendResetIfLinked(p.SteamId, state);
@@ -238,6 +240,7 @@ namespace Factions
                     state.HasGridSensor = false;
                     state.Tracker.Clear();
                     state.OwesClientReset = true;
+                    state.ResetReason = "unseated";
                     SendResetIfLinked(p.SteamId, state);
                     continue;
                 }
@@ -332,7 +335,7 @@ namespace Factions
         public void Close()
         {
             foreach (KeyValuePair<long, PlayerScannerState> pair in _states)
-                ClearState(pair.Key, pair.Value);
+                ClearState(pair.Key, pair.Value, "close");
             _states.Clear();
             _profiles.SaveIfDirty();
         }
@@ -388,6 +391,9 @@ namespace Factions
                 new List<WireContact>(), new List<string>(), true));
             if (UplinkManager.DebugTraffic)
                 _uplink.WriteTraffic("SCANNER_CONTACTS steam=" + steamId + " reset (scanner inactive)");
+            if (DebugTraces.Relation)
+                FactionsPlugin.Log.Info("SCANNER_RELATION steam=" + steamId + " reset=" + (state.ResetReason ?? "unknown")
+                    + " sent=0 first=0 changed=0 shifts=-");
         }
 
         /// <summary>Wire equivalent of the GPS enactment below. Nothing is sent when nothing
@@ -407,6 +413,8 @@ namespace Factions
             AppendWireContacts(present, delta.UpdatedContacts, viewerIdentityId);
 
             _uplink.Send(steamId, FactionsWire.WriteScannerContacts(present, delta.RemovedKeys, reset));
+            // Before this pass clears _relations, so the tally reads the answers just sent.
+            if (DebugTraces.Relation) TraceRelations(steamId, viewerIdentityId, delta, state, reset);
             // Guarded at the call site, not inside the writer: the concatenation below must not
             // run at all on the normal path, which is every linked player every scanner pass.
             if (UplinkManager.DebugTraffic)
@@ -453,9 +461,51 @@ namespace Factions
             }
         }
 
+        /// <summary>SCANNER_RELATION: what this send did to the colours the client holds. A contact
+        /// that left the sphere keeps its last-sent relation, so one that comes back in another colour
+        /// counts as a shift, and so does a reset followed by a resend.</summary>
+        private void TraceRelations(ulong steamId, long viewerIdentityId, ScannerContactDelta delta,
+                                    PlayerScannerState state, bool reset)
+        {
+            try
+            {
+                RelationTrace.EnsureArmed();
+                if (state.SentGeneration != RelationTrace.Generation)
+                {
+                    state.SentRelations.Clear();
+                    state.SentGeneration = RelationTrace.Generation;
+                }
+                var tally = new RelationShiftTally();
+                TallyRelations(tally, delta.NewContacts, viewerIdentityId, state);
+                TallyRelations(tally, delta.UpdatedContacts, viewerIdentityId, state);
+                if (tally.Changed == 0 && !reset) return;
+                FactionsPlugin.Log.Info("SCANNER_RELATION steam=" + steamId + " viewer=" + viewerIdentityId
+                    + " reset=" + (reset ? state.ResetReason ?? "unknown" : "no")
+                    + " sent=" + tally.Sent + " first=" + tally.First + " changed=" + tally.Changed
+                    + " shifts=" + tally.FormatShifts());
+            }
+            catch (Exception ex)
+            {
+                FactionsPlugin.Log.Warn(ex, "Scanner relation trace failed.");
+            }
+        }
+
+        private void TallyRelations(RelationShiftTally tally, List<ScannerContact> contacts, long viewerIdentityId,
+                                    PlayerScannerState state)
+        {
+            foreach (ScannerContact c in contacts)
+            {
+                string now = RelationFor(c, viewerIdentityId).ToString();
+                string previous;
+                if (!state.SentRelations.TryGetValue(c.Key, out previous)) previous = null;
+                tally.Add(c.OwnerTag, previous, now);
+                state.SentRelations[c.Key] = now;
+            }
+        }
+
         // Cleared per player per pass: a relationship is viewer-relative. Shared implementation with
         // the map feature, so both send a player the same standing for the same faction.
-        private readonly ViewerRelations _relations = new ViewerRelations();
+        private readonly ViewerRelations _relations = new ViewerRelations("scanner");
 
         private WireRelation RelationFor(ScannerContact contact, long viewerIdentityId)
         {
@@ -543,12 +593,13 @@ namespace Factions
             foreach (string key in keys) Delete(identityId, state, key, false);
         }
 
-        private static void ClearState(long identityId, PlayerScannerState state)
+        private static void ClearState(long identityId, PlayerScannerState state, string reason)
         {
             ClearMarkers(identityId, state);
             state.Tracker.Clear();
             state.Tokens.Clear();
             state.OwesClientReset = true;
+            state.ResetReason = reason;
         }
 
         private static Color Colour(ScannerContactKind kind, bool unclaimed)
@@ -589,6 +640,13 @@ namespace Factions
             /// carry reset=true, or contacts the client already holds are stranded: the server no
             /// longer knows their keys, so it can never name them for removal.</summary>
             public bool OwesClientReset;
+            /// <summary>Why <see cref="OwesClientReset"/> was last set, for SCANNER_RELATION.</summary>
+            public string ResetReason;
+            /// <summary>Under <c>factions debug relation</c> only: the relation last sent per contact
+            /// key, kept across resets. Discarded when <see cref="SentGeneration"/> is stale.</summary>
+            public readonly Dictionary<string, string> SentRelations =
+                new Dictionary<string, string>(StringComparer.Ordinal);
+            public int SentGeneration;
         }
     }
 }

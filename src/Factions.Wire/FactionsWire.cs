@@ -1124,6 +1124,10 @@ namespace Factions.Wire
         Neutral = 2,
         /// <summary>Owned by a faction hostile to the viewing player.</summary>
         Enemy = 3,
+        /// <summary>Owned by a faction friendly to the viewing player. A new value in an existing
+        /// byte, so no <see cref="FactionsWire.ProtocolVersion"/> move: a client older than it draws
+        /// it in its fallback grey.</summary>
+        Friendly = 4,
     }
 
     /// <summary>One scanner contact as it crosses the wire. Mirrors the server-side
