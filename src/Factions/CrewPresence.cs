@@ -506,7 +506,8 @@ namespace Factions
             var sb = new StringBuilder("crew visits: active=").Append(Populations.Count)
                 .Append(" watched=").Append(Watched.Count).Append(" entry=oriented_hull_or_seat exit_grace_s=20")
                 .Append(" pending_cancellation_bound=").Append(PendingSpawns != null)
-                .Append(" last=").Append(_lastVisit);
+                .Append(" last=").Append(_lastVisit)
+                .Append("\n ").Append(CrewSeatYield.Status());
             foreach (var entry in Populations)
             {
                 Population population = entry.Value;
@@ -818,6 +819,11 @@ namespace Factions
             CrewCombat.Tick();
             CrewFooting.Tick();
             ++_frame;
+            if (_frame % 15 == 0)
+            {
+                try { CrewSeatYield.Tick(); }
+                catch (Exception ex) { FactionsPlugin.Log.Warn(ex, "Crew seat yield pass failed."); }
+            }
             if (MySession.Static == null || MyAIComponent.Static == null) return;
             if (_frame % 30 == 0) TickOrders();
             if (_frame % 120 != 0) return;

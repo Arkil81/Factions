@@ -114,7 +114,7 @@ if ($BridgeCommand) {
     $outbox = Join-Path $bridgeDir 'outbox.txt'
 
     $outboxBefore = 0
-    if (Test-Path $outbox) { $outboxBefore = (Get-Content $outbox -ErrorAction SilentlyContinue | Measure-Object -Line).Lines }
+    if (Test-Path $outbox) { $outboxBefore = @(Get-Content $outbox -ErrorAction SilentlyContinue).Count }
 
     Write-Host "Bridge: queueing '$BridgeCommand' -> $inbox" -ForegroundColor Cyan
     [System.IO.File]::WriteAllText($inbox, ($BridgeCommand -replace "`r`n", "`n"))

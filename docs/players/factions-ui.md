@@ -63,7 +63,8 @@ The radio voice itself is switched on or off in the **Radio** window, not here.
 ## Additions to the game's own screens
 
 - **Terminal (K):** an **Assets** tab and an **Events** tab.
-- **Factions tab:** your stance with the selected NPC faction, and the **Diplomacy…** button.
+- **Factions tab:** your stance with the selected NPC faction, and the **Diplomacy…** button. A
+  faction's balance is shown only to its own members and to admins.
 - **Store blocks:** a **Ship inventory** choice to trade from your whole docked ship, and **Withdraw**
   and **Deposit** tabs at your own station.
 - **Services Terminal:** **Refuel H2**, **Refuel O2** and **Rearm** for a docked ship; **Restore** in

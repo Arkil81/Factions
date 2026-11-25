@@ -184,6 +184,8 @@ namespace Factions.Core
         /// (<c>RelationTrace</c>). Off by default.</summary>
         public static bool Relation;
 
+        public static bool CrewSeats;
+
         /// <summary>Toggle name → (read, write). One table so the command, the startup state line and
         /// the tests cannot drift from each other.</summary>
         private static readonly Dictionary<string, string> Descriptions =
@@ -219,6 +221,7 @@ namespace Factions.Core
                 { "trespass",       "TRESPASS_CROSSING — each seated pilot's change of space (from, to, either may be '-' or a player faction's) or of whether the owner sees them, and each logout from inside someone's space (decision log)" },
                 { "asminput",       "ASSEMBLER_INPUT — each change of an assembler's input-tray plan: mode, the queue item it stocks, what it pushed out and pulled in (Torch log)" },
                 { "relation",       "RELATION_RESOLVE — each viewer's answer for an owner faction when it changes, with the deciding step and the SE table entry; SCANNER_RELATION — each scanner send that changed a contact's relation or reset the client, with the reason and the shifts by owner; RELATION_ROWS — player-faction rows in SE's relation table, checked every 60 s, on change (Torch log)" },
+                { "seats",          "CREW_SEAT_YIELD — each bot that stood up from a seat, cryo chamber or bed because a player with access reached for it: the block, whether a deck spot was found, and the player (Torch log)" },
                 { "fuel",           "FUEL_OBSERVED / FSD_OBSERVED — modelled vs observed burn on a materialised manoeuvre and on a player grid in supercruise — and FUEL_DRAWN, one line per leg the abstract fleet flies (very high volume; 'factions fuel' is the aggregate)" },
             };
 
@@ -262,6 +265,7 @@ namespace Factions.Core
                 case "trespass":       Trespass = !Trespass;                     nowOn = Trespass; break;
                 case "asminput":       AssemblerInput = !AssemblerInput;         nowOn = AssemblerInput; break;
                 case "relation":       Relation = !Relation;                     nowOn = Relation; break;
+                case "seats":          CrewSeats = !CrewSeats;                   nowOn = CrewSeats; break;
                 default: return false;
             }
             Descriptions.TryGetValue(name, out description);
@@ -302,6 +306,7 @@ namespace Factions.Core
             yield return new KeyValuePair<string, bool>("trespass",       Trespass);
             yield return new KeyValuePair<string, bool>("asminput",       AssemblerInput);
             yield return new KeyValuePair<string, bool>("relation",       Relation);
+            yield return new KeyValuePair<string, bool>("seats",          CrewSeats);
         }
 
         /// <summary>Restores the shipped defaults. Tests flip these statics, and a leak into a
@@ -318,7 +323,7 @@ namespace Factions.Core
             Extraction = false; Tactics = false; Restoration = false;
             Admission = false; SpawnCost = false; Alloc = false;
             Landing = false; Trespass = false; AssemblerInput = false;
-            Relation = false;
+            Relation = false; CrewSeats = false;
         }
     }
 }

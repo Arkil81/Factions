@@ -115,7 +115,8 @@ function Get-TorchLogBaseline {
     $f = Get-LatestTorchLogFile
     if (-not $f) { return [pscustomobject]@{ Path = $null; Lines = 0 } }
     $count = 0
-    try { $count = (Get-Content $f.FullName -ErrorAction Stop | Measure-Object -Line).Lines } catch { }
+    # Every line, blank ones included: Select-Object -Skip counts them, Measure-Object -Line does not.
+    try { $count = @(Get-Content $f.FullName -ErrorAction Stop).Count } catch { }
     return [pscustomobject]@{ Path = $f.FullName; Lines = $count }
 }
 

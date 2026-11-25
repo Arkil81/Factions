@@ -605,7 +605,7 @@ namespace Factions
             return false;
         }
 
-        private static void Teleport(MyCharacter character, Vector3D feet)
+        internal static void Teleport(MyCharacter character, Vector3D feet)
         {
             MatrixD destination = character.WorldMatrix;
             destination.Translation = feet;
@@ -616,6 +616,7 @@ namespace Factions
         {
             if (seat.Closed || seat.MarkedForClose || !seat.IsFunctional || seat.CubeGrid != hull) return false;
             if (seat.Pilot != null && seat.Pilot != character) return false;
+            if (seat.Pilot == null && CrewSeatYield.Held(seat)) return false;
             foreach (KeyValuePair<long, Agent> entry in Agents)
                 if (entry.Key != character.EntityId && entry.Value.Seat == seat) return false;
             return true;
