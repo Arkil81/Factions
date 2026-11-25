@@ -34,6 +34,7 @@ namespace Factions
         private static readonly HashSet<long> QuietGrids = new HashSet<long>();
         /// <summary>Station grid id -> the grid ids quieted with it.</summary>
         private static readonly Dictionary<long, List<long>> ByStation = new Dictionary<long, List<long>>();
+        /// <summary>Scratch lists of grids, emptied after each use so a closed grid is never held here.</summary>
         private static readonly List<IMyCubeGrid> GroupScratch = new List<IMyCubeGrid>();
         private static readonly List<MyEntity> Movers = new List<MyEntity>();
         private static readonly List<long> DropScratch = new List<long>();
@@ -132,6 +133,7 @@ namespace Factions
             }
             finally
             {
+                Movers.Clear();
                 _tickTicks += Stopwatch.GetTimestamp() - t0;
                 if (StationMaterializer.DebugEnabled) Report();
             }
@@ -157,13 +159,20 @@ namespace Factions
             catch { }
             if (GroupScratch.Count == 0) GroupScratch.Add(station);
             var ids = new List<long>(GroupScratch.Count);
-            for (int i = 0; i < GroupScratch.Count; i++)
+            try
             {
-                var g = GroupScratch[i] as MyCubeGrid;
-                if (g == null || g.Closed) continue;
-                ids.Add(g.EntityId);
-                QuietGrids.Add(g.EntityId);
-                ForEachInHierarchy(g, e => MyEntities.UnregisterForUpdate(e));
+                for (int i = 0; i < GroupScratch.Count; i++)
+                {
+                    var g = GroupScratch[i] as MyCubeGrid;
+                    if (g == null || g.Closed) continue;
+                    ids.Add(g.EntityId);
+                    QuietGrids.Add(g.EntityId);
+                    ForEachInHierarchy(g, e => MyEntities.UnregisterForUpdate(e));
+                }
+            }
+            finally
+            {
+                GroupScratch.Clear();
             }
             ByStation[station.EntityId] = ids;
             _quieted++;

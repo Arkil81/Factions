@@ -5,13 +5,41 @@ market, node and fleet windows, and the traffic-control voice. On a server witho
 nothing.
 
 It installs through [Pulsar](https://github.com/SpaceGT/Pulsar). Pulsar builds it from this
-repository's source and keeps it up to date, so there is no file to download.
+repository's source and keeps it up to date.
 
-## Before you start
+## Quick install (Windows)
+
+1. Close Space Engineers.
+2. Download and run
+   [FactionsUI-Setup.exe](https://github.com/Arkil81/Factions/releases/latest/download/FactionsUI-Setup.exe).
+3. Click **Install**. If Steam is running, the installer asks to close it and starts it again when it
+   has finished.
+4. Start Space Engineers from Steam as usual. The first start takes longer while Pulsar builds
+   Factions UI.
+
+The installer installs Pulsar into `%AppData%\Pulsar` if you do not have it, sets Space Engineers'
+Steam launch options to start the game with Pulsar's `Legacy.exe`, and adds and enables Factions UI
+in Pulsar. If you already use Pulsar, it keeps your other plugins, mods and launch options, and
+backs up each file it changes beside the original (`.bak`). Running it again changes nothing.
+**Remove Factions UI** in the same window takes Factions UI out of Pulsar again.
+
+The installer is not code-signed, so Windows may show **Windows protected your PC** the first time.
+Click **More info**, then **Run anyway**. Its source is in this repository, under
+`src/FactionsInstaller`.
+
+The installer stops without changing anything if Space Engineers' launch options start the game
+through a program other than Pulsar, or pick a Pulsar profile with `-profile`. Install by hand
+instead, as below.
+
+## Install by hand
+
+Use this on Linux, or if the installer cannot set things up for you.
+
+### Before you start
 
 You need two things in place before installing Factions UI.
 
-### 1. Pulsar
+#### 1. Pulsar
 
 Pulsar is the plugin loader that runs Space Engineers plugins. If you do not have it yet, download
 it from the [Pulsar releases page](https://github.com/SpaceGT/Pulsar/releases/latest) and follow
@@ -24,7 +52,7 @@ built for. `Interim.exe` runs it on .NET 10, and Factions UI does not support th
 hides it from the plugin list without any message. `Modern.exe` is for Space Engineers 2. Your Steam
 launch options (below) show which one you use.
 
-### 2. The `-sources` launch option
+#### 2. The `-sources` launch option
 
 Pulsar normally only offers plugins from its own built-in list, and Factions UI is not on that list.
 To add a plugin from somewhere else, as this guide does, Pulsar has to be started with the launch
@@ -60,7 +88,7 @@ In Steam, the finished launch options look like this:
 
 You only need to do this once. The option stays in place for every future game start.
 
-## Install
+### Install
 
 1. Start Space Engineers and click **Plugins** in the main menu.
 
@@ -166,6 +194,8 @@ it for `FactionsUI:`.
   file. Remove the hub entry and add it under **Plugins** instead.
 
 ## Uninstall
+
+If you used the installer, run it again and click **Remove Factions UI**. Otherwise:
 
 Untick **Enabled** for Factions UI in the plugin list and restart. To remove it completely, also
 delete the Factions entry under **Sources** → **Plugins**.

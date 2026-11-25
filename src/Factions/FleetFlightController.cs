@@ -2085,7 +2085,8 @@ namespace Factions
                 : Vector3.Zero;   // zero == dampen the whole velocity vector == brake and hold
             if (analogue)
             {
-                st.Analogue.Apply(cmd, kind, velWorld, grid.Physics.Gravity, grid.Physics.Mass, ref toLocal, nowUtc);
+                st.Analogue.Apply(cmd, kind, velWorld, grid.Physics.Gravity, grid.Physics.Mass, ref toLocal, nowUtc,
+                    kind == ManoeuvreKind.Launch ? sample.LaunchHandoffMs : 0);
                 NoteThrustInput(st, st.Analogue.Input);
             }
             else
@@ -2158,6 +2159,11 @@ namespace Factions
                              + " dampeners=" + st.Thrust.DampenersEnabled
                              + " autopilot=" + st.Thrust.AutopilotEnabled
                              + " writes=" + st.Analogue.Writes
+                             + (st.Analogue.WingCount > 0
+                                 ? " wings=" + st.Analogue.WingCount
+                                   + " wingScale=" + st.Analogue.WingScale.ToString("F2")
+                                   + " wingN=" + st.Analogue.WingCounterN.Length().ToString("F0")
+                                 : "")
                              + " errorMs=" + (ToVector3D(cmd.DesiredVelocityMs.Value) - velWorld).Length().ToString("F2") : "")
                          + " decel=" + decel.ToString("F2")
                          + " mass=" + grid.Physics.Mass.ToString("F0")

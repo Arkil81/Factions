@@ -52,6 +52,16 @@ namespace Factions.Core
             };
         }
 
+        /// <summary>Whether a hull may be given crew at all: a dynamic grid with a physics body. A
+        /// projector's preview grid is dynamic and carries real seat blocks, but has no physics; a
+        /// bot seated there makes SE treat it as a controlled grid, and its per-frame prediction
+        /// update then dereferences the missing body and takes the whole server down (Main,
+        /// 2026-11-25, twice). Mirrors the host's check on <c>MyCubeGrid</c>.</summary>
+        public static bool MayCrewHull(bool isStatic, bool isPreview, bool hasPhysics)
+        {
+            return !isStatic && !isPreview && hasPhysics;
+        }
+
         /// <summary>The unarmed movement trial uses native passive seats, even when the design
         /// carries authored spawn points. It tests one hull with at most eight characters.</summary>
         public static int TrialCount(CrewLayout layout, int emptyCrewSeats)

@@ -280,6 +280,14 @@ namespace Factions
             return false;
         }
 
+        /// <summary>A live, dynamic hull with a physics body; never a projector's preview grid (see
+        /// <see cref="ShipCrew.MayCrewHull"/>).</summary>
+        internal static bool MayCrew(MyCubeGrid grid)
+        {
+            return grid != null && !grid.Closed && !grid.MarkedForClose
+                && ShipCrew.MayCrewHull(grid.IsStatic, grid.IsPreview, grid.Physics != null);
+        }
+
         private static bool Entered(MyPlayer player, MyCubeGrid grid)
         {
             if (player == null || player.IsBot || player.Id.SerialId != 0 || player.Character == null
@@ -317,7 +325,7 @@ namespace Factions
                 foreach (MyEntity entity in EntryCandidates)
                 {
                     MyCubeGrid grid = entity as MyCubeGrid;
-                    if (grid == null || grid.IsStatic || (_anchor != null && _anchor.Grid == grid)
+                    if (!MayCrew(grid) || (_anchor != null && _anchor.Grid == grid)
                         || Occupied.Contains(grid.EntityId) || !Entered(player, grid)) continue;
                     // Solo-owned/unowned ships use neutral native astronauts; no faction is required.
                     Occupied.Add(grid.EntityId);
@@ -327,7 +335,7 @@ namespace Factions
             foreach (long id in new List<long>(Populations.Keys))
             {
                 Population population = Populations[id];
-                if (population.Anchor.Grid.Closed || population.Anchor.Grid.MarkedForClose
+                if (!MayCrew(population.Anchor.Grid)
                     || !population.Visit.Update(Occupied.Contains(id), CrewOrderControl.Held(population.Anchor.Grid, BotsOf(population)), 2))
                     StopPopulation(id);
             }
@@ -638,8 +646,8 @@ namespace Factions
             MyCubeGrid grid = BenchSpawner.CrewGrid(label);
             if (grid == null) return "crew: no live bench hull '" + label + "'; use factions bench spawn first.";
             if (Retired.Contains(grid.EntityId)) return "crew: respawn this bench hull before another trial (old bot callbacks may still be finishing).";
-            if (grid.IsStatic || grid.GridSizeEnum != MyCubeSize.Large)
-                return "crew: the first movement trial requires a dynamic large-grid hull.";
+            if (!MayCrew(grid) || grid.GridSizeEnum != MyCubeSize.Large)
+                return "crew: the first movement trial requires a dynamic large-grid hull with physics (not a projection).";
             MyFaction faction = MySession.Static.Factions.TryGetFactionByTag(tag);
             if (faction == null) return "crew: no faction '" + tag + "'.";
             if (!FactionsPlugin.IsEffectivelyNpc(faction)) return "crew: the trial requires an NPC faction.";

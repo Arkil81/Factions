@@ -232,6 +232,7 @@ namespace Factions
             // Before the session manager on purpose: a framework that publishes its API once, from a
             // session component, reaches only handlers registered before the world loads.
             VpfAmmoBridge.Register();
+            AeroWingsBridge.Register();
             // Same reason, same place: Nexus publishes its dispatcher once, at its own session load.
             _nexusRelay = new NexusRelay();
             _nexusRelay.Register();
@@ -271,6 +272,8 @@ namespace Factions
             StoreShipSaleMarks.TryPatch(_harmony);
             // MyPhysicsBody.AddForce: counted only for a grid under 'factions dampprobe'.
             DampenerProbe.TryPatch(_harmony);
+            // MyCubeGrid.UpdatePredictionFlag: a controlled grid with no physics is skipped, not fatal.
+            PredictionFlagGuard.TryPatch(_harmony);
             // MyLandingGear lock/reattach/release: 'factions debug landing'. The client runs the same probe.
             LandingProbe.TryPatch(_harmony, "server", () => DebugTraces.Landing, line => Log.Info(line),
                                   new[] { 0.25, 1.0 });
@@ -9239,6 +9242,7 @@ namespace Factions
             // the publisher owns a background thread that must be asked to drain.
             if (_serverPerf != null) { _serverPerf.Dispose(); _serverPerf = null; }
             _nexusRelay?.Unregister();
+            AeroWingsBridge.Unregister();
             _harmony?.UnpatchAll(_harmony.Id);
             if (_sessionManager != null) _sessionManager.SessionStateChanged -= OnSessionStateChanged;
             Instance = null;

@@ -29,18 +29,26 @@ namespace Factions.Core
         public static Vec3 Fractions(Vec3 wantedMs, Vec3 velocityMs, Vec3 gravityMs2,
                                      double massKg, AxisThrust available, double responseSeconds = ResponseSeconds)
         {
+            return Fractions(wantedMs, velocityMs, gravityMs2, massKg, available, responseSeconds, new Vec3(0, 0, 0));
+        }
+
+        /// <summary>As above, with <paramref name="extraN"/> added to the force asked of every axis: a
+        /// known external force to fly through, such as <see cref="WingLift.CounterN"/>.</summary>
+        public static Vec3 Fractions(Vec3 wantedMs, Vec3 velocityMs, Vec3 gravityMs2, double massKg,
+                                     AxisThrust available, double responseSeconds, Vec3 extraN)
+        {
             if (massKg <= 0 || responseSeconds <= 0) return new Vec3(0, 0, 0);
             return new Vec3(
-                Axis(wantedMs.X - velocityMs.X, gravityMs2.X, massKg, available.RightN, available.LeftN, responseSeconds),
-                Axis(wantedMs.Y - velocityMs.Y, gravityMs2.Y, massKg, available.UpN, available.DownN, responseSeconds),
-                Axis(wantedMs.Z - velocityMs.Z, gravityMs2.Z, massKg, available.BackwardN, available.ForwardN, responseSeconds));
+                Axis(wantedMs.X - velocityMs.X, gravityMs2.X, massKg, available.RightN, available.LeftN, responseSeconds, extraN.X),
+                Axis(wantedMs.Y - velocityMs.Y, gravityMs2.Y, massKg, available.UpN, available.DownN, responseSeconds, extraN.Y),
+                Axis(wantedMs.Z - velocityMs.Z, gravityMs2.Z, massKg, available.BackwardN, available.ForwardN, responseSeconds, extraN.Z));
         }
 
         private static double Axis(double errorMs, double gravityMs2, double massKg,
-                                   double positiveN, double negativeN, double responseSeconds)
+                                   double positiveN, double negativeN, double responseSeconds, double extraN)
         {
             if (Math.Abs(errorMs) <= VelocityDeadbandMs) errorMs = 0;
-            double forceN = massKg * (errorMs / responseSeconds - gravityMs2);
+            double forceN = massKg * (errorMs / responseSeconds - gravityMs2) + extraN;
             double capacityN = forceN >= 0 ? positiveN : negativeN;
             if (capacityN <= 0) return 0;
             return Math.Max(-1, Math.Min(1, forceN / capacityN));

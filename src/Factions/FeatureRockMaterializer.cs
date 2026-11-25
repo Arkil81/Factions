@@ -948,16 +948,24 @@ namespace Factions
                 _movers.Clear();
                 RockContactPhysics.CollectMovers(_movers);
                 double range2 = range * range;
-                foreach (MyEntity e in _movers)
+                try
                 {
-                    if (!(e is MyCubeGrid) && !(e is MyCharacter)) continue;
-                    Vector3D p = e.PositionComp.GetPosition();
-                    var posKm = new Vec3(p.X / 1000.0, p.Y / 1000.0, p.Z / 1000.0);
-                    bool near = false;
-                    for (int i = 0; i < players.Count && !near; i++) near = players[i].DistanceSquaredTo(posKm) <= range2;
-                    if (!near) continue;
-                    Vector3 v = e.Physics.LinearVelocity;
-                    _anchors.Add(new RockShellAnchor(posKm, new Vec3(v.X, v.Y, v.Z)));
+                    foreach (MyEntity e in _movers)
+                    {
+                        if (!(e is MyCubeGrid) && !(e is MyCharacter)) continue;
+                        Vector3D p = e.PositionComp.GetPosition();
+                        var posKm = new Vec3(p.X / 1000.0, p.Y / 1000.0, p.Z / 1000.0);
+                        bool near = false;
+                        for (int i = 0; i < players.Count && !near; i++) near = players[i].DistanceSquaredTo(posKm) <= range2;
+                        if (!near) continue;
+                        Vector3 v = e.Physics.LinearVelocity;
+                        _anchors.Add(new RockShellAnchor(posKm, new Vec3(v.X, v.Y, v.Z)));
+                    }
+                }
+                finally
+                {
+                    // Scratch only: a grid left here outlives its close until the next pass with a player near.
+                    _movers.Clear();
                 }
             }
 

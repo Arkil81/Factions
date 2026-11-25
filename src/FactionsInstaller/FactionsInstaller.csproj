@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    FactionsUI-Setup.exe: sets up Pulsar and Factions UI on a player's Windows machine (FAC-520).
+    Published with each public release; see scripts/public-export/README.md. Not part of build.ps1.
+    .NET Framework 4.8 so it runs on any Windows 10/11 without a runtime download, and is a single
+    small file. Logic/ has no Windows dependency and is compiled into tests/FactionsInstaller.Tests.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>FactionsUI-Setup</AssemblyName>
+    <RootNamespace>FactionsInstaller</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Product>Factions UI Setup</Product>
+    <Description>Sets up Pulsar and the Factions UI client plugin for Space Engineers.</Description>
+    <Copyright>GPL-3.0</Copyright>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml.Linq" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the exe build off Windows; on Windows the targeting pack is used either way. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

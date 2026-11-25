@@ -23,8 +23,9 @@ New to a server running Factions? Read the [players' guide](docs/players/README.
 
 ## Installing the client plugin
 
-Factions UI installs through [Pulsar](https://github.com/SpaceGT/Pulsar) straight from this repository:
-see [Installing Factions UI](docs/install-client.md). Client and server must speak the same wire
+Factions UI installs through [Pulsar](https://github.com/SpaceGT/Pulsar) straight from this repository.
+On Windows, [FactionsUI-Setup.exe](https://github.com/Arkil81/Factions/releases/latest/download/FactionsUI-Setup.exe)
+sets up both; see [Installing Factions UI](docs/install-client.md). Client and server must speak the same wire
 protocol, which each [release](https://github.com/Arkil81/Factions/releases) states.
 
 ## Building

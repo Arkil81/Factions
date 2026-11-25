@@ -6,6 +6,17 @@ namespace Factions.Core.Tests
     public class ShipCrewTests
     {
         [Fact]
+        public void OnlyADynamicHullWithPhysicsMayBeCrewed()
+        {
+            Assert.True(ShipCrew.MayCrewHull(isStatic: false, isPreview: false, hasPhysics: true));
+            // A projector's preview: dynamic, seats present, no physics body.
+            Assert.False(ShipCrew.MayCrewHull(isStatic: false, isPreview: true, hasPhysics: false));
+            Assert.False(ShipCrew.MayCrewHull(isStatic: false, isPreview: true, hasPhysics: true));
+            Assert.False(ShipCrew.MayCrewHull(isStatic: false, isPreview: false, hasPhysics: false));
+            Assert.False(ShipCrew.MayCrewHull(isStatic: true, isPreview: false, hasPhysics: true));
+        }
+
+        [Fact]
         public void MissingOrIncompleteSurveyIsUnknown()
         {
             Assert.Equal(CrewHullClass.Unknown, ShipCrew.Estimate(null).Class);

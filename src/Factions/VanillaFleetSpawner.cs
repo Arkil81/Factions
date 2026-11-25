@@ -2707,6 +2707,13 @@ namespace Factions
             MyRemoteControl rc = PlaceAttachedRc(grid, min, max, facing, formerNeighbours);
             if (rc != null) return rc;
 
+            // The removed seat is closed only after this frame, so its id and default name are still
+            // registered: rebuild it under a fresh one (BlockRestore).
+            if (ob != null)
+            {
+                ob.Name = BlockRestore.RestoredName(ob.Name, ob.EntityId);
+                ob.EntityId = 0;
+            }
             if (ob != null && _addBlockMethod.Invoke(grid, new object[] { ob, false }) == null)
                 Log.Warn("VanillaFleetSpawner: could not restore " + ob.SubtypeName + " at " + min
                          + " on grid eid=" + grid.EntityId + " after a refused RC exchange.");

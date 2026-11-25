@@ -55,7 +55,9 @@ display, the map, the station windows, the traffic-control radio voice and respa
 stations. Without it you still get the economy and the chat messages, but you are working half
 blind.
 
-Installing it takes a few minutes: see [Installing Factions UI](../install-client.md).
+On Windows, run [FactionsUI-Setup.exe](https://github.com/Arkil81/Factions/releases/latest/download/FactionsUI-Setup.exe)
+and click **Install**; see [Installing Factions UI](../install-client.md) for what it does and for
+the manual route.
 
 Once it is installed and you join the server, it connects by itself. If the server and the plugin
 are on different versions, a red message on screen tells you so. Restarting the game lets the
