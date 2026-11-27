@@ -18,8 +18,8 @@ namespace Factions.Core.Tests
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.StationVoxels));
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.StationLoot));
             Assert.True(FeatureSwitch.IsOn(FeatureSwitch.FleetTrespass));
-            Assert.False(FeatureSwitch.IsOn(FeatureSwitch.LearnedCeiling), "before its first deploy");
-            Assert.False(FeatureSwitch.IsOn(FeatureSwitch.NexusLeftoverPilot), "before its first deploy");
+            Assert.True(FeatureSwitch.IsOn(FeatureSwitch.LearnedCeiling));
+            Assert.True(FeatureSwitch.IsOn(FeatureSwitch.NexusLeftoverPilot));
             Assert.False(FeatureSwitch.Set("rock-shell", true));
             Assert.False(FeatureSwitch.Set("zone-fire", true));
         }

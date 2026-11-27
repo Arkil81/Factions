@@ -235,7 +235,7 @@ internal static class FactionsPageOverview
     }
 
     /// <summary>The four rows for one answer. Word bands for a foreign faction; the viewer's own, or
-    /// any for an admin, are exact.</summary>
+    /// any for an admin with the admin view on, are exact.</summary>
     internal static void Describe(WireFactionIntel f, string[] text, string[] tips)
     {
         if (f.Exact)

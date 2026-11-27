@@ -96,6 +96,7 @@ Raid, conquer and defend campaigns have no chat command; they are placed on the 
 | `!factions diplomacy gift (tag)` | leader | Sends them a gift of credits. |
 | `!factions diplomacy propose (tag) nonaggression\|alliance` | leader | Proposes a pact. |
 | `!factions diplomacy withdraw (tag)` | leader | Withdraws your offer. |
+| `!factions adminintel [on\|off]` | admin | Whether the Factions page shows you every faction's true figures and treasury (on) or the same estimates as any player (off, the default). Remembered across restarts. |
 
 See [Diplomacy](diplomacy.md) for what each one does.
 

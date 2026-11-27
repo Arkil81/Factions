@@ -120,6 +120,7 @@ namespace Factions
         /// <summary><c>!factions kit</c>; null on a dark server and before the session loads.</summary>
         private KitService _kits;
         internal KitService Kits { get { return _kits; } }
+        internal PlayerFactionIntelManager FactionIntel { get { return _playerFactionIntelManager; } }
         private readonly FactionTuning _tuning = new FactionTuning();
         private Harmony _harmony;   // shared with the runtime (seed/floor/income knobs)
         private PrefabBookValueCache _prefabBookValues;
@@ -837,7 +838,8 @@ namespace Factions
                 _playerShelfManager = new PlayerShelfManager(_runtime, _uplinkManager);
                 _playerBankSalesManager = new PlayerBankSalesManager(_runtime, _uplinkManager);
                 _playerDiplomacyManager = new PlayerDiplomacyManager(_runtime, _uplinkManager);
-                _playerFactionIntelManager = new PlayerFactionIntelManager(_runtime, _uplinkManager, _playerScannerManager);
+                _playerFactionIntelManager = new PlayerFactionIntelManager(_runtime, _uplinkManager, _playerScannerManager,
+                    () => StorageDir);
                 _playerWingManager = new PlayerWingManager(_runtime, _uplinkManager);
                 _playerCrewOrderManager = new PlayerCrewOrderManager(_uplinkManager);
                 _combatOutcomeNotices = new CombatOutcomeNotices(_runtime, _uplinkManager);

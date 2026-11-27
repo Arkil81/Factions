@@ -33,15 +33,15 @@ namespace Factions.Core
 
         /// <summary>The prefab performance ceiling judges a prefab by its learned cost (PrefabCostLearner)
         /// once one is established, not by the bench formula alone. It takes hulls out of role pools
-        /// mid-session, so it is switched (AGENTS.md rule 8): off on its first deploy, while the
-        /// learned table is read against the formula; learning and `factions serverperf prefabs` run
+        /// mid-session, so it is switched (AGENTS.md rule 8): on at boot since v0.629.2, and the switch
+        /// is there to turn it off, back to the formula. Learning and `factions serverperf prefabs` run
         /// either way.</summary>
         public const string LearnedCeiling = "learned-ceiling";
 
         /// <summary>FAC-530: on a Nexus server, a pilot just sent to another server inside a ship is not
         /// sent again as a loose character; the copy left behind is closed instead (NexusLeftoverPilotGuard).
-        /// It closes a player's character, so it is switched (AGENTS.md rule 8): off on its first deploy,
-        /// when it only logs the leftovers it would close, on at boot from the next.</summary>
+        /// It closes a player's character, so it is switched (AGENTS.md rule 8): on at boot since v0.629.1,
+        /// and the switch is there to turn it off. Off, it only logs the leftovers it would close.</summary>
         public const string NexusLeftoverPilot = "nexus-leftover-pilot";
 
         public static readonly string[] Known = { PhysicsPerWorld, StationVoxels, StationLoot, FleetTrespass, LearnedCeiling, NexusLeftoverPilot };
@@ -52,6 +52,8 @@ namespace Factions.Core
                 { StationVoxels, true },
                 { StationLoot, true },
                 { FleetTrespass, true },
+                { NexusLeftoverPilot, true },
+                { LearnedCeiling, true },
             };
 
         public static bool IsOn(string name)
