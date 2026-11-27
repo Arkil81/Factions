@@ -3,17 +3,25 @@
 ## The scanner
 
 The scanner shows you the nodes and fleets that you have detected: stations, outposts, ore fields,
-rare ore fields, ice fields, refineries, fuel depots, fleets and fights in progress.
+rare ore fields, ice fields, refineries, fuel depots, fleets and fights in progress. It also shows
+other grids: other players' ships and bases, NPC grids and unowned wrecks. Your own faction's grids
+are shown too; the ship you are flying is not.
 
 **With the client plugin**, contacts are drawn directly on your HUD:
 
-- Blue contacts belong to your own faction, white to neutral factions and red to enemies. Grey
-  contacts are unclaimed or not yet identified.
+- Blue contacts belong to your own faction, green to friendly factions, white to neutral factions
+  and red to enemies. Grey contacts are unclaimed or not yet identified.
 - Hold **Alt** to show contact names.
 - Contacts you are not detecting right now, but saw earlier, are drawn dimmed.
-- Fleets show how many ships they have, and what they are doing, such as *Raid: (place)*.
+- Fleets show how many ships they have, and what they are doing, such as *Raid: (place)*, once you
+  are close enough to make them out. See *How much you learn* and *Reading a fleet marker* below.
 - A station that is talking to you on the radio is marked with a pulsing ring, which is red if it
   is warning you off.
+- A grid reads *Grid* at first. Closer in, it shows its size (*Large grid, 340 blocks*), then its
+  owner, its name (hold **Alt**) and whether its owner is offline, then whether it is armed. A grid
+  that broadcasts with an antenna or beacon shows its owner straight away. *Owner offline* means
+  attacking it is an offline raid: see [Fleets and combat](fleets-and-combat.md#attacking-other-players).
+- The map shows the same grids.
 
 The scanner can be turned off in the plugin settings: see [Factions UI reference](factions-ui.md).
 
@@ -31,6 +39,145 @@ on foot who is not in a faction sees stations and sites but not fleets.
 Once you have detected a node, you remember it, so it stays on your map and scanner after you fly
 away.
 
+### How much you learn about a fleet
+
+Detecting a fleet does not tell you everything about it. The closer it is, compared with how far your
+sensors reach, the more you learn:
+
+| Distance, as a share of your range | You see |
+|---|---|
+| Edge of range | A grey marker: something is there, and where it is heading. |
+| Within about half | How many ships, and what kind of mission. |
+| Within about a third | Who owns it, and its colour. |
+
+- **Traders, haulers, miners and ferries announce themselves.** You see who owns them at any range.
+  Raids, patrols and guards do not.
+- **A fleet attacking your station is always identified to you.**
+- **Your own faction's fleets are always fully shown.**
+- **Only your own and friendly factions' fleets show where they are going** (route and arrival time).
+  For any other fleet you see its heading and have to work out the rest.
+
+### Reading a fleet marker
+
+The scanner and the map draw fleets with the same marker, and it answers three questions at once:
+**its shape is the mission**, **its colour is the owner**, and **the marks above it are the number
+of ships**.
+
+![An enemy raid of seven to eleven ships: a red arrowhead with two red bars above it](../images/icons/example-enemy-raid.png)
+
+*An enemy raid of seven to eleven ships.*
+
+**Shape: what the fleet is doing.** Several missions share one shape, grouped by what you would do
+about them. Hold **Alt** to see a scanner contact's label, such as *Raid: (place)*; for your own
+fleets the Assets tab names the exact mission.
+
+| Marker | Shape | Missions | What it means for you |
+|---|---|---|---|
+| ![Arrowhead](../images/icons/fleet-raid.png) | Arrowhead | Raid, Conquest, Retaliation | A strike force on its way to attack a station. Dangerous to its target and to anyone near it. |
+| ![Shield](../images/icons/fleet-guard.png) | Shield | Guard, Reinforce | Warships defending a station, or on their way to strengthen one. |
+| ![Ring](../images/icons/fleet-patrol.png) | Ring | Patrol, Muster | Warships patrolling their faction's space, or gathering for a campaign. They watch for intruders. |
+| ![Tag](../images/icons/fleet-trade.png) | Tag | Trade, Gift | Goods or a gift travelling between factions. Harmless. |
+| ![Hexagon](../images/icons/fleet-haul.png) | Hexagon | Haul, Ferry | Cargo moving between one faction's own stations. Harmless. |
+| ![Diamond](../images/icons/fleet-mine.png) | Diamond | Mine | Mining ships working an ore field. Harmless. |
+| ![Dot](../images/icons/fleet-generic.png) | Dot | Not known | You have not made out its mission yet. Fly closer, or wait for it to come closer. |
+
+**Colour: whose it is.** The same colours as every other contact. A fleet stays grey until you are
+close enough to tell who owns it, unless it is one that announces itself.
+
+| Marker | Colour | Owner |
+|---|---|---|
+| ![Blue marker](../images/icons/colour-own.png) | Blue | Your own faction |
+| ![Green marker](../images/icons/colour-friendly.png) | Green | A friendly faction |
+| ![White marker](../images/icons/colour-neutral.png) | White | A neutral faction |
+| ![Red marker](../images/icons/colour-enemy.png) | Red | An enemy faction |
+| ![Grey dot](../images/icons/colour-unknown.png) | Grey | Not yet identified |
+
+**Marks above: how many ships.** A lone ship has no marks. Two or three ships show one dot per ship;
+larger fleets show bars, and the largest a cross. The marks are drawn in the fleet's colour, and the
+map's fleet panel gives the exact count.
+
+| Marker | Ships |
+|---|---|
+| ![No marks](../images/icons/echelon-1.png) | 1 |
+| ![Two dots](../images/icons/echelon-2.png) | 2 |
+| ![Three dots](../images/icons/echelon-3.png) | 3 |
+| ![One bar](../images/icons/echelon-4-6.png) | 4 to 6 |
+| ![Two bars](../images/icons/echelon-7-11.png) | 7 to 11 |
+| ![Three bars](../images/icons/echelon-12-17.png) | 12 to 17 |
+| ![A cross](../images/icons/echelon-18.png) | 18 or more |
+
+You see the marks and the mission shape only once you are close enough to make out the fleet's size
+and mission: see *How much you learn about a fleet* above.
+
+**Rings: fighting or holding.** On the map, a ring around a fleet says what it is doing right now.
+The marker itself does not change, so you can still read its mission during a fight.
+
+| Marker | Ring | Meaning |
+|---|---|---|
+| ![Arrowhead inside an orange-red ring](../images/icons/ring-engaging.png) | Orange-red, pulsing | The fleet is fighting. |
+| ![Shield inside a steady blue ring](../images/icons/ring-holding.png) | Blue, steady | The fleet is holding position to defend a station. |
+
+Stations get rings of their own: a pulsing orange-red ring while one is under attack, red once its
+shield is down, and a steady amber ring while its safe zone is off after a raid.
+
+### How much you learn about a place
+
+Places are graded the same way, and **you keep the best look you have had**. A close pass is not
+undone by a later long-range one; it only goes out of date after three days, when the next sighting
+replaces it.
+
+- **Stations announce themselves.** You learn a station's name and owner as soon as you detect it.
+- **A field or claim seen from far off** is a grey marker with no name. Closer, you learn what is
+  there (station or field, the ore, how developed it is). Closer still, its name and owner.
+- **Your own faction's places are always fully shown**, and anything already on your map before
+  this change keeps what it showed.
+
+### How developed a place is
+
+The map icon shows how built-up a node is, around its ore icon:
+
+| Icon | Stage |
+|---|---|
+| The ore icon on its own | **Field**: nothing built |
+| Ore icon on a platform | **Outpost**: equipment, but no station |
+| Ore icon in a hexagon | **Settlement**: a station |
+| Hexagon with three docking arms | **Hub**: a large, well-equipped station |
+| Hub inside a ring | **Capital**: a faction's biggest hub; one per faction at most |
+
+The icon is filled in the owner's colour once you know who owns it, and drawn as a grey outline
+until then. An unidentified station is labelled with its stage (*Hub*, *Capital*) instead of its name.
+
+### How well defended a place is
+
+Fly close to a station (roughly a sixth of your detection range) and you also learn how well it is
+defended: its turrets and the warships parked there. The map draws up to three dots over the icon:
+
+| Dots | Defence |
+|---|---|
+| none, and the panel says *undefended* | nothing but the station itself |
+| one | light |
+| two | contested: a raid would have a fight |
+| three | fortress: beyond most raids |
+
+You keep the last reading. The station window shows it with its age (*light (1/3), 3 d ago*), and says
+*not scanned* until you have been close. A defence can change after you leave, so an old reading is a
+guess. Your own faction's places always show their current defence.
+
+### What you know of a faction
+
+The Factions page (**K**, Factions) opens on an **Overview** of the selected faction. The member
+list is on the **Members** tab next to it.
+
+| Row | Built from |
+|---|---|
+| Known nodes | the places you have identified as theirs |
+| Estimated wealth | how developed those places are: *Poor*, *Modest*, *Comfortable*, *Prosperous* or *Rich* |
+| Estimated fleet strength | the defences you have scanned up close, plus the strongest of their fleets you have seen up close in the last three days: *Negligible*, *Light*, *Moderate*, *Strong* or *Overwhelming*, with the age of the newest reading |
+
+These are your own estimates, and they only count what you have seen. A faction you have scouted
+once can be far bigger than it looks. A row you have nothing for reads *Unknown*. Your own faction
+shows its real figures.
+
 ## The map
 
 Press **M** to open the Factions map (client plugin only). The key can be changed in the plugin
@@ -41,7 +188,8 @@ alone while you are placing blocks.
   to move the view.
 - Click a node or fleet to select it, and double-click to centre the view on it.
 - The panel for a selected node shows its owner, and anything happening there: a siege, an attack,
-  a raid that succeeded, a safe zone that is down.
+  a raid that succeeded, a safe zone that is down. A node you have not identified shows only its
+  stage, and the station window says *Unidentified station*.
 - The panel for a selected fleet shows how many ships it has, where it is going and when it
   arrives.
 

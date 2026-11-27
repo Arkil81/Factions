@@ -198,6 +198,18 @@ internal sealed class MapWorld
         public readonly Vector3D PositionM;
         public readonly double RadiusM;
         public readonly double HoldStrength;
+        /// <summary>A <see cref="WireIntelTier"/>. The server has blanked every field above it.</summary>
+        public readonly byte Tier;
+        /// <summary>A <see cref="WireNodeStage"/>; None below Class.</summary>
+        public readonly byte Stage;
+        /// <summary>A <see cref="WireDefenceBand"/>; Unknown until the viewer has read it at
+        /// Armament.</summary>
+        public readonly byte Defence;
+        /// <summary>Name, owner and relation colour are known. Below this the marker is grey and the
+        /// label, if any, is the stage word.</summary>
+        public bool Identified => Tier >= (byte)WireIntelTier.Identity;
+        /// <summary>Station or field, zone and stage are known.</summary>
+        public bool Classed => Tier >= (byte)WireIntelTier.Class;
 
         /// <summary>True when a sensor has this node right now. False means remembered: identity and
         /// position are current -- a node does not move -- while owner and standing are last-known
@@ -217,6 +229,11 @@ internal sealed class MapWorld
         public MapNode(WireMapNode w)
         {
             Id = w.Id;
+            Tier = w.Tier;
+            Stage = w.Stage;
+            Defence = w.Defence;
+            // Below Identity there is no name, and the id is a key rather than something to show:
+            // MarkDistinctNames skips a node whose name is its id, so it is left unlabelled there.
             DisplayName = string.IsNullOrEmpty(w.DisplayName) ? w.Id : w.DisplayName;
             DominantOre = w.DominantOre ?? "";
             Surveyed = w.Surveyed;
@@ -235,7 +252,7 @@ internal sealed class MapWorld
         /// <summary>Scenery: nothing under it, nothing on it, nothing to go to. An UNSURVEYED node
         /// is deliberately not empty — nobody has looked, which is a reason to visit rather than a
         /// reason to hide it.</summary>
-        public bool IsEmpty => DominantOre.Length == 0 && CapabilityMask == 0 && !HasStation && Surveyed;
+        public bool IsEmpty => Classed && DominantOre.Length == 0 && CapabilityMask == 0 && !HasStation && Surveyed;
     }
 
     internal sealed class MapFaction
@@ -255,6 +272,11 @@ internal sealed class MapWorld
     internal sealed class MapFleet
     {
         public readonly string Key;
+        /// <summary>A <see cref="WireIntelTier"/>. The server has zeroed every field above it.</summary>
+        public readonly byte Tier;
+        /// <summary>Whether <see cref="TargetM"/>, <see cref="EtaUtc"/> and <see cref="StopsM"/>
+        /// were offered. Without them the map draws no route and states no arrival.</summary>
+        public readonly bool HasFlightPlan;
         public readonly byte Kind;
         public readonly string OwnerTag;
         public readonly byte Relation;
@@ -266,6 +288,11 @@ internal sealed class MapWorld
         /// Empty on a direct leg. Legs the server has not routed yet are not sent, so the drawn
         /// route never runs straight through a body it would in fact arc around.</summary>
         public readonly Vector3D[] StopsM;
+        /// <summary>A grid the sim does not own rather than a fleet: no mission, no route, and
+        /// <see cref="Label"/> and <see cref="Name"/> say what the viewer's tier shows.</summary>
+        public readonly bool IsGrid;
+        public readonly string Label;
+        public readonly string Name;
 
         /// <summary>
         /// This fleet is a raid holding at its target and fighting there right now, rather than one
@@ -292,13 +319,18 @@ internal sealed class MapWorld
         public MapFleet(WireMapFleet w)
         {
             Key = w.Key;
+            Tier = w.Tier;
+            HasFlightPlan = w.HasFlightPlan;
             Kind = w.Kind;
-            OwnerTag = w.OwnerTag;
+            OwnerTag = string.IsNullOrEmpty(w.OwnerTag) ? null : w.OwnerTag;
             Relation = w.Relation;
             TargetM = new Vector3D(w.TargetXKm * 1000.0, w.TargetYKm * 1000.0, w.TargetZKm * 1000.0);
             EtaUtc = new DateTime(w.EtaUtcTicks, DateTimeKind.Utc);
             ConvoySize = w.ConvoySize;
             EntityId = w.EntityId;
+            IsGrid = w.IsGrid;
+            Label = string.IsNullOrEmpty(w.Label) ? null : w.Label;
+            Name = string.IsNullOrEmpty(w.Name) ? null : w.Name;
 
             _sampledPositionM = new Vector3D(w.XKm * 1000.0, w.YKm * 1000.0, w.ZKm * 1000.0);
             _velocityMPerSec = new Vector3D(
@@ -340,6 +372,15 @@ internal sealed class MapWorld
             }
 
             double x, y, z;
+            if (!HasFlightPlan)
+            {
+                DeadReckon.ExtrapolateOpen(
+                    _sampledPositionM.X, _sampledPositionM.Y, _sampledPositionM.Z,
+                    _velocityMPerSec.X, _velocityMPerSec.Y, _velocityMPerSec.Z,
+                    NowSeconds() - _sampledAtSeconds,
+                    out x, out y, out z);
+                return new Vector3D(x, y, z);
+            }
             DeadReckon.Extrapolate(
                 _sampledPositionM.X, _sampledPositionM.Y, _sampledPositionM.Z,
                 _velocityMPerSec.X, _velocityMPerSec.Y, _velocityMPerSec.Z,

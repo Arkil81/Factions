@@ -39,6 +39,11 @@ namespace Factions
         public double BroadcastRadiusKm;
         /// <summary>Non-zero once a physical grid exists.</summary>
         public long MaterialisedEntityId;
+        /// <summary>The node this fleet is fighting at, while it fights; null otherwise. Its owner
+        /// identifies the attacker at any margin.</summary>
+        public string EngagementTargetNodeId;
+        /// <summary>The fleet's weapon DPS, for the viewer's fleet-sightings record. Server-side only.</summary>
+        public double WeaponDps;
         /// <summary>The clearance polyline still ahead of the current destination, already resolved
         /// to world positions — <see cref="FleetItinerary.RoutedStopCount"/> of the fleet's remaining
         /// stops. Legs the resolver has not routed yet are left out: they are bare destinations with

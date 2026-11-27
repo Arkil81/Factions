@@ -1892,7 +1892,7 @@ namespace Factions.Core
             return hulls;
         }
 
-        private static Dictionary<string, List<WeaponBand>> BuildGuardedStrengthIndex(IList<FactionState> states)
+        internal static Dictionary<string, List<WeaponBand>> BuildGuardedStrengthIndex(IList<FactionState> states)
         {
             var guarded = new Dictionary<string, List<WeaponBand>>(StringComparer.OrdinalIgnoreCase);
             for (int si = 0; si < states.Count; si++)

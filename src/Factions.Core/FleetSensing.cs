@@ -171,6 +171,29 @@ namespace Factions.Core
         /// <summary>As above, with planets able to stand between a sensor and the target. Each sensor
         /// is tested on its own line: an estate spread around a body still sees what any one of its
         /// nodes can see.</summary>
+        /// <summary>
+        /// The best reading any one of <paramref name="sensors"/> takes of the target: detected if any
+        /// sensor detects it, with the largest margin any sensor measures. Detection agrees with
+        /// <see cref="IsDetectedBy(IList{SensorSource},Vec3,double,double,SensorOcclusion)"/>; the
+        /// margin is what grades the contact (<see cref="IntelGrade"/>).
+        /// </summary>
+        public static SensorReading Measure(
+            IList<SensorSource> sensors, Vec3 targetPosKm, double signature, double targetBroadcastKm,
+            SensorOcclusion occlusion)
+        {
+            SensorReading best = SensorReading.NotDetected;
+            if (sensors == null) return best;
+            for (int i = 0; i < sensors.Count; i++)
+            {
+                SensorSource sensor = sensors[i];
+                SensorReading r = Sensing.Measure(sensor.PositionKm, sensor.StrengthKm, targetPosKm, signature,
+                                                  targetBroadcastKm, occlusion);
+                if (!r.Detected) continue;
+                if (!best.Detected || r.MarginDb > best.MarginDb) best = r;
+            }
+            return best;
+        }
+
         public static bool IsDetectedBy(
             IList<SensorSource> sensors, Vec3 targetPosKm, double signature, double targetBroadcastKm,
             SensorOcclusion occlusion)

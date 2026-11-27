@@ -693,6 +693,11 @@ internal sealed class NodeDetailScreen : MyGuiScreenBase
 
     private static string HeadingFor(WireNodeDetail detail)
     {
+        // The server sends no name below Identity and nothing about the site below Class, so the
+        // heading says what is known rather than reading an absent station as a bare claim.
+        if (detail.Tier < (byte)WireIntelTier.Class) return "Unidentified contact  " + detail.Id;
+        if (detail.Tier < (byte)WireIntelTier.Identity)
+            return (detail.HasStation ? "Unidentified station  " : "Unidentified site  ") + detail.Id;
         string name = string.IsNullOrEmpty(detail.DisplayName) ? detail.Id : detail.DisplayName;
         string id = string.IsNullOrEmpty(detail.DisplayName) || detail.DisplayName == detail.Id ? "" : "  " + detail.Id;
         return detail.HasStation ? name + id : name + id + "  (claimed, not yet founded)";
@@ -721,15 +726,21 @@ internal sealed class NodeDetailScreen : MyGuiScreenBase
 
     private void WriteOverview(WireNodeDetail detail)
     {
-        SetRow(0, "Owner", (string.IsNullOrEmpty(detail.OwnerTag) ? "unclaimed" : detail.OwnerTag)
-                           + " (" + RelationLabel(detail.Relation) + ")", null);
-        SetRow(1, "Hold", Percent(detail.HoldStrength), null);
+        bool identified = detail.Tier >= (byte)WireIntelTier.Identity;
+        SetRow(0, "Owner", !identified ? "not identified"
+                           : (string.IsNullOrEmpty(detail.OwnerTag) ? "unclaimed" : detail.OwnerTag)
+                             + " (" + RelationLabel(detail.Relation) + ")", null);
+        SetRow(1, "Hold", identified ? Percent(detail.HoldStrength) : "unknown", null);
         string zoneTip;
         SetRow(2, "Safe zone", DescribeZone(detail, out zoneTip), zoneTip);
 
         if (!detail.Owned)
         {
-            for (int i = 3; i < OverviewRows; i++) SetRow(i, "", "", null);
+            // A scan's reading, with its age: what a raid on this node would be sized against as of
+            // then. Read only at close range (Armament), so most foreign nodes say so.
+            SetRow(3, "Defence", NodeLabels.Defence(detail.Defence, detail.DefenceAgeSeconds) ?? "not scanned",
+                   "Read by a close scan and remembered. A raid meets what is there now.");
+            for (int i = 4; i < OverviewRows; i++) SetRow(i, "", "", null);
             return;
         }
 

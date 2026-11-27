@@ -72,7 +72,7 @@ namespace Factions
         /// <summary>The player behind a hit, resolved the way <c>MyCharacter.DoDamage</c> does: a
         /// character, a hand weapon or tool's carrier, or a block's owner (ship grinders, turrets,
         /// warheads). Zero when nothing resolves.</summary>
-        private static long AttackerIdentity(long attackerId)
+        internal static long AttackerIdentity(long attackerId)
         {
             MyEntity attacker;
             if (attackerId == 0 || !MyEntities.TryGetEntityById(attackerId, out attacker) || attacker == null) return 0;

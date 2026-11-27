@@ -24,7 +24,11 @@ namespace Factions.Core
         /// special case; and a stealthy approach stays possible while a stealthy fight does not.
         /// Appended, so an older client renders it as a generic marker rather than losing the
         /// feed.</summary>
-        RaidEngagement
+        RaidEngagement,
+        /// <summary>A grid the sim does not own: a player's ship or base, a vanilla NPC grid, a
+        /// derelict (FAC-533). Detected by the fleet rule; its label is composed per tier by
+        /// <see cref="ScannerGrids.Withhold"/>.</summary>
+        Grid
     }
 
     public struct ScannerFleetCandidate
@@ -66,6 +70,8 @@ namespace Factions.Core
         /// <summary>Hulls in the convoy, for the strength mark above the marker. Zero means a
         /// legacy fleet that never wrote a size, and reads as one.</summary>
         public int ConvoySize;
+        /// <summary>The fleet's weapon DPS, for the fleet-sightings record. Never on the wire.</summary>
+        public double WeaponDps;
         /// <summary>How the squadron is fighting (<see cref="Factions.Core.TacticHint.Phrase"/>), appended to the
         /// contact's label; null while it is not flying a combat manoeuvre.</summary>
         public string TacticHint;
@@ -100,6 +106,37 @@ namespace Factions.Core
         /// <summary>Hulls in the convoy; zero for a contact that is not a fleet, and for a legacy
         /// fleet that never wrote a size.</summary>
         public int ConvoySize;
+        /// <summary>The fleet's weapon DPS, for the fleet-sightings record. Never on the wire.</summary>
+        public double WeaponDps;
+
+        // ---- Intelligence grade (FAC-526). Computed every pass, sent nowhere yet. -------------
+
+        /// <summary>Signal-to-noise margin of this detection, dB (<see cref="SensorReading.MarginDb"/>).
+        /// Negative infinity for a contact found only through its broadcast.</summary>
+        public double MarginDb;
+        /// <summary>Whether this contact announces its identity: a station, a civilian mission, or a
+        /// broadcasting grid.</summary>
+        public bool Transponder;
+        /// <summary>For a fleet striking a node, that node's owner: the one viewer it is identified
+        /// to at any margin, because it is already shooting at them. Null otherwise.</summary>
+        public string IdentifiedToTag;
+        /// <summary>The viewer's tier, set by <see cref="PlayerScanner.Grade"/>. None until then.</summary>
+        public IntelTier Tier;
+        /// <summary>Whether <see cref="TargetPosKm"/> is the fleet's offered destination. Cleared by
+        /// <see cref="PlayerScanner.Withhold"/> for a viewer the owner does not tell; the target is
+        /// then zero and a client dead-reckons without a clamp.</summary>
+        public bool HasFlightPlan;
+
+        // ---- Grid contacts (FAC-533). Zero for every other kind. Never on the wire as fields: the
+        // ---- label carries what the tier shows.
+
+        /// <summary>A grid's majority owner; zero when unowned. Lets a factionless owner's own grid
+        /// grade as their own, and the host colour it by the owner's standing.</summary>
+        public long OwnerIdentityId;
+        public string OwnerName;
+        public bool OwnerOffline;
+        public bool GridLarge;
+        public int GridBlocks;
     }
 
     public sealed class ScannerContactDelta
@@ -154,6 +191,14 @@ namespace Factions.Core
         private Dictionary<string, ScannerContact> _contacts =
             new Dictionary<string, ScannerContact>(StringComparer.Ordinal);
 
+        /// <summary>The contact as the last <see cref="Reconcile"/> left it, so a grade can apply
+        /// hysteresis against the tier it held then.</summary>
+        public bool TryGetPrevious(string key, out ScannerContact contact)
+        {
+            if (key == null) { contact = default(ScannerContact); return false; }
+            return _contacts.TryGetValue(key, out contact);
+        }
+
         public ScannerContactDelta Reconcile(IEnumerable<ScannerContact> desired)
         {
             var delta = new ScannerContactDelta();
@@ -191,7 +236,7 @@ namespace Factions.Core
     {
         public static bool IsTemporaryGps(ScannerContactKind kind)
         {
-            return kind != ScannerContactKind.Fleet;
+            return kind != ScannerContactKind.Fleet && kind != ScannerContactKind.Grid;
         }
 
         public static ScannerGpsUpdateMode SelectGpsUpdateMode(
@@ -233,7 +278,9 @@ namespace Factions.Core
             FactionTuning tuning = null,
             IItemPriceCatalogue prices = null,
             IItemRegistry registry = null,
-            SensorOcclusion occlusion = null)
+            SensorOcclusion occlusion = null,
+            IEnumerable<ScannerGridCandidate> grids = null,
+            long excludeGridEntityId = 0)
         {
             var result = new List<ScannerContact>();
             if (level < 1 || rangeKm <= 0) return result;
@@ -261,7 +308,12 @@ namespace Factions.Core
                         DisplayName = NodeName(node),
                         PositionKm = node.Position,
                         Unclaimed = unclaimed,
-                        OwnerTag = node.OwnerFactionTag
+                        OwnerTag = node.OwnerFactionTag,
+                        // The node branch is a flat sphere, so its margin is the sphere's: detail
+                        // grades on it while detection itself stays flat (FAC-125).
+                        MarginDb = IntelGrade.MarginDb(rangeKm, Math.Sqrt(DistanceSquared(originKm, node.Position))),
+                        // A station squawks; a bare claimed field does not.
+                        Transponder = IsStation(node)
                     });
                 }
             }
@@ -278,8 +330,9 @@ namespace Factions.Core
                     // around it -- FleetSensing gives the dwell a large excitation and a floor, so a
                     // fight is loud and a better scanner is worth MORE against it, not bypassed by it.
                     double signature = fleet.Signature > 0 ? fleet.Signature : 1.0;
-                    if (!Sensing.Detects(originKm, rangeKm, fleet.PositionKm, signature,
-                                         fleet.BroadcastRadiusKm, occlusion)) continue;
+                    SensorReading reading = Sensing.Measure(originKm, rangeKm, fleet.PositionKm, signature,
+                                                            fleet.BroadcastRadiusKm, occlusion);
+                    if (!reading.Detected) continue;
 
                     // Engaging is a different thing to see than a convoy under way: it is parked, it
                     // names the place it is fighting over, and it is the one contact a player can act
@@ -295,6 +348,7 @@ namespace Factions.Core
                         PositionKm = fleet.PositionKm,
                         VelocityKmPerMin = engaging ? new Vec3() : fleet.VelocityKmPerMin,
                         TargetPosKm = engaging ? new Vec3() : fleet.TargetPosKm,
+                        HasFlightPlan = !engaging,
                         Moving = !engaging,
                         EntityId = fleet.EntityId,
                         OwnerTag = fleet.OwnerTag,
@@ -303,11 +357,143 @@ namespace Factions.Core
                         // open on both surfaces rather than only this one, and it is answered in
                         // one place for both or not at all (FAC-373).
                         FleetKind = fleet.MissionKind,
-                        ConvoySize = fleet.ConvoySize
+                        ConvoySize = fleet.ConvoySize,
+                        WeaponDps = fleet.WeaponDps,
+                        MarginDb = reading.MarginDb,
+                        Transponder = IntelGrade.IsCivilianMission((ActionKind)fleet.MissionKind)
+                                      || fleet.BroadcastRadiusKm > 0,
+                        IdentifiedToTag = engaging ? OwnerOf(fleet.EngagementTargetNodeId, nodes) : null
                     });
                 }
             }
+
+            if (grids != null)
+            {
+                foreach (ScannerGridCandidate grid in grids)
+                {
+                    // The grid being flown is the sensor, not a contact.
+                    if (grid.EntityId == 0 || grid.EntityId == excludeGridEntityId) continue;
+                    double signature = grid.Signature > 0 ? grid.Signature : 1.0;
+                    SensorReading reading = Sensing.Measure(originKm, rangeKm, grid.PositionKm, signature,
+                                                            grid.BroadcastRadiusKm, occlusion);
+                    if (!reading.Detected) continue;
+                    result.Add(ScannerGrids.ToContact(grid, reading));
+                }
+            }
             return result;
+        }
+
+        /// <summary>
+        /// Sets each contact's <see cref="ScannerContact.Tier"/>, with hysteresis against the tier the
+        /// same contact held in <paramref name="previous"/>. Call it before
+        /// <see cref="ScannerContactTracker.Reconcile"/>, which replaces what the tracker remembers.
+        ///
+        /// <para><paramref name="isOwnFaction"/> answers whether an owner tag is the viewer's own
+        /// faction. It is a delegate because only the host can say: a viewer's faction is an SE
+        /// membership, and Core never sees one.</para>
+        /// </summary>
+        public static void Grade(IList<ScannerContact> contacts, ScannerContactTracker previous,
+                                 Func<string, bool> isOwnFaction, FactionTuning tuning,
+                                 long viewerIdentityId = 0)
+        {
+            if (contacts == null) return;
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                ScannerContact c = contacts[i];
+                ScannerContact before;
+                IntelTier held = previous != null && previous.TryGetPrevious(c.Key, out before)
+                    ? before.Tier : IntelTier.None;
+                bool own = (isOwnFaction != null && !c.Unclaimed && !string.IsNullOrEmpty(c.OwnerTag)
+                            && isOwnFaction(c.OwnerTag))
+                           || (viewerIdentityId != 0 && c.OwnerIdentityId == viewerIdentityId);
+                bool transponder = c.Transponder
+                    || (isOwnFaction != null && !string.IsNullOrEmpty(c.IdentifiedToTag) && isOwnFaction(c.IdentifiedToTag));
+                var reading = new SensorReading
+                {
+                    Detected = true,
+                    SensorSees = !double.IsNegativeInfinity(c.MarginDb),
+                    MarginDb = c.MarginDb
+                };
+                c.Tier = IntelGrade.Of(reading, held, own, transponder, tuning);
+                contacts[i] = c;
+            }
+        }
+
+        /// <summary>
+        /// Removes from each fleet contact what the viewer has not earned. Call after
+        /// <see cref="Grade"/>, before the contacts reach the wire. A withheld field is zeroed, never
+        /// hidden, so nothing the viewer may not know leaves the server.
+        ///
+        /// <list type="bullet">
+        /// <item>Below Class: no mission, no hull count, and a fight reads as a plain fleet.</item>
+        /// <item>Below Identity: no owner, so the marker is grey.</item>
+        /// <item>The destination is offered, never observed: kept only where
+        /// <paramref name="offersFlightPlan"/> says the owner tells this viewer.</item>
+        /// </list>
+        /// </summary>
+        public static void Withhold(IList<ScannerContact> contacts, Func<string, bool> offersFlightPlan,
+                                    FactionTuning tuning = null)
+        {
+            if (contacts == null) return;
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                ScannerContact c = contacts[i];
+                if (c.Kind == ScannerContactKind.Grid)
+                {
+                    ScannerGrids.Withhold(ref c, tuning);
+                    contacts[i] = c;
+                    continue;
+                }
+                if (c.Kind != ScannerContactKind.Fleet && c.Kind != ScannerContactKind.RaidEngagement)
+                {
+                    // A node below Identity is grey and unnamed. Its kind stays: a station always
+                    // squawks, so a node this low is a bare field and the kind names only the ground.
+                    if (!IntelGrade.ShowsIdentity(c.Tier) && c.Tier != IntelTier.None)
+                    {
+                        c.OwnerTag = null;
+                        c.DisplayName = null;
+                        c.Unclaimed = false;
+                        c.IdentifiedToTag = null;
+                        contacts[i] = c;
+                    }
+                    continue;
+                }
+                if (c.HasFlightPlan && c.Tier != IntelTier.Full
+                    && (offersFlightPlan == null || string.IsNullOrEmpty(c.OwnerTag) || !offersFlightPlan(c.OwnerTag)))
+                {
+                    c.HasFlightPlan = false;
+                    c.TargetPosKm = new Vec3();
+                }
+                if (!IntelGrade.ShowsClass(c.Tier))
+                {
+                    c.FleetKind = 0;
+                    c.ConvoySize = 0;
+                    if (c.Kind == ScannerContactKind.RaidEngagement)
+                    {
+                        c.Kind = ScannerContactKind.Fleet;
+                        c.Label = "Fleet";
+                    }
+                }
+                if (!IntelGrade.ShowsIdentity(c.Tier))
+                {
+                    c.OwnerTag = null;
+                    c.IdentifiedToTag = null;
+                }
+                contacts[i] = c;
+            }
+        }
+
+        private static bool IsStation(SpatialNode node)
+        {
+            return node.StableStationId > 0 || !string.IsNullOrEmpty(node.StationPrefabId);
+        }
+
+        private static string OwnerOf(string nodeId, IEnumerable<SpatialNode> nodes)
+        {
+            if (string.IsNullOrEmpty(nodeId) || nodes == null) return null;
+            foreach (SpatialNode n in nodes)
+                if (n != null && n.Id == nodeId) return n.OwnerFactionTag;
+            return null;
         }
 
         /// <summary>What a scanner contact reads as. Asked of the ground and the station rather than
@@ -318,8 +504,7 @@ namespace Factions.Core
         private static void Classify(SpatialNode node, FactionTuning tuning, IItemPriceCatalogue prices,
             IItemRegistry registry, out ScannerContactKind kind, out string label)
         {
-            bool station = node.StableStationId > 0 || !string.IsNullOrEmpty(node.StationPrefabId);
-            if (station)
+            if (IsStation(node))
             {
                 kind = node.Zone == NodeZone.Surface ? ScannerContactKind.Outpost : ScannerContactKind.Station;
                 label = kind == ScannerContactKind.Outpost ? "Outpost" : "Station";

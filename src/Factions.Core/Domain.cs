@@ -3885,6 +3885,57 @@ namespace Factions.Core
         /// <c>MaxBroadcastRadius</c> class default, which no vanilla antenna overrides.</summary>
         public double SensorAntennaReferenceM = 50000.0;
 
+        /// <summary>Signal-to-noise margin, dB, at which a contact opens the Class tier: hull count
+        /// and grid class, or station-or-field and economic stage. 6 dB is half the detection range.
+        /// See <see cref="IntelGrade"/> and docs/fog-of-war.md → Intelligence grades.</summary>
+        public double IntelClassDb = 6.0;
+        /// <summary>Margin at which a contact opens the Identity tier without a transponder: owner,
+        /// relation colour, a node's name. 10 dB is 32% of the detection range.</summary>
+        public double IntelIdentityDb = 10.0;
+        /// <summary>Margin at which a contact opens the Armament tier: strength band, a node's
+        /// defence band. 16 dB is 16% of the detection range.</summary>
+        public double IntelArmamentDb = 16.0;
+        /// <summary>How far below its threshold a tier a contact already holds stays open, dB. The ATC
+        /// squelch's rule, so a contact on a boundary does not flicker.</summary>
+        public double IntelHysteresisDb = 2.0;
+        /// <summary>Economic score at which a station reads as a Hub on the map: the sum of its
+        /// capability levels plus a tenth of its headcount (<see cref="NodeStages.Score"/>). 10 was
+        /// read off the live graph on 2026-11-25 (FAC-529): 367 of 485 stations score 0, 60 score
+        /// exactly 5 (one seeded facility), 32 score 10 or more.</summary>
+        public double NodeHubScore = 10.0;
+        /// <summary>How long a remembered node grade stays authoritative, hours. A lower-tier
+        /// reading replaces it only once it is older than this, so passing at long range does not
+        /// erase a close scan and a close scan does not stay true forever.</summary>
+        public double IntelStaleAfterHours = 72.0;
+
+        /// <summary>Node defence (the offensive gate's <c>OfNodeDefence</c>, with committed Guards) at
+        /// which a scan reads two pips rather than one. 2026-11-26 census: p75 7k, p90 49k across 506
+        /// stations; raid squadrons carry 55k–290k (FAC-531).</summary>
+        public double IntelDefenceContestedDps = 20000.0;
+        /// <summary>…and three pips: beyond what most raid squadrons carry, about the top 5%.</summary>
+        public double IntelDefenceFortressDps = 100000.0;
+        /// <summary>A grid scanned at Armament reads <c>heavily armed</c> from this weapon DPS up,
+        /// <c>armed</c> below it, <c>unarmed</c> at none (FAC-533). The default is a contested node's
+        /// defence: one hull that could hold a station on its own.</summary>
+        public double IntelGridHeavyDps = 20000.0;
+
+        /// <summary>How long a fleet sighting counts toward a faction's estimated strength on the
+        /// Factions page, hours: the strongest armed fleet seen at Armament inside it (FAC-532).</summary>
+        public double IntelFleetWindowHours = 72.0;
+        /// <summary>Estimated-wealth edges on the Factions page: the stage score of the viewer's known
+        /// nodes (Outpost 1, Settlement 2, Hub 4, Capital 8). 2026-11-26 census, full intel across 10
+        /// factions: 10, 12, 16, 16, 46, 52, 122, 240, 246, 358; two factions a band (FAC-532).</summary>
+        public double IntelWealthModestScore = 15.0;
+        public double IntelWealthComfortableScore = 40.0;
+        public double IntelWealthProsperousScore = 100.0;
+        public double IntelWealthRichScore = 200.0;
+        /// <summary>Estimated-strength edges: Σ the viewer's remembered node defence plus the
+        /// strongest fleet sighting. 2026-11-26 census, full intel: 147k to 1.95M (FAC-532).</summary>
+        public double IntelStrengthLightDps = 150000.0;
+        public double IntelStrengthModerateDps = 450000.0;
+        public double IntelStrengthStrongDps = 650000.0;
+        public double IntelStrengthOverwhelmingDps = 900000.0;
+
         /// <summary>Smallest player-owned grid that is a detection target, in blocks. Debris and
         /// one-block scrap are not contacts; anything a player would call a ship is.</summary>
         public int SignatureGridMinBlocks = 5;
@@ -3893,6 +3944,18 @@ namespace Factions.Core
         /// (<see cref="SignatureDecayWeaponsFireSeconds"/>, 15 s) so an unmanned turret firing is
         /// still caught; a seated grid is sampled every pass regardless.</summary>
         public double SignatureGridSampleSeconds = 10.0;
+        /// <summary>FAC-534: how long after a faction's last human member logs off before damage to its
+        /// grids counts as an offline raid, minutes. Damage inside the window is the fight that was
+        /// already happening.</summary>
+        public double OfflineRaidGraceMinutes = 15.0;
+        /// <summary>FAC-534: how often an offline raider is shown the warning again during one raid, minutes.</summary>
+        public double OfflineRaidWarnRepeatMinutes = 5.0;
+        /// <summary>FAC-534: a raid ends once its attacker has not hit the victim for this long, minutes;
+        /// the summary is logged then.</summary>
+        public double OfflineRaidEndAfterMinutes = 5.0;
+        /// <summary>FAC-534: a faction going wholly offline within this many minutes of hostile player
+        /// damage to its grids is combat logging, and its attackers are not offline raiders for that fight.</summary>
+        public double CombatLogWindowMinutes = 5.0;
         /// <summary>How far a graph neighbour still counts as something you simply know about.
         ///
         /// <para>Adjacency alone is not a knowledge relation: the node graph is linked by *routing*
@@ -4422,6 +4485,7 @@ namespace Factions.Core
         public long CentralBankGrantTreasuryBuffer = 75000; // treasury target after a grant
         public double CentralBankGrantRunwayTicks = 12.0; // when bleeding, target at least this many economy quanta of runway
         public double CentralBankGrantCollateralFraction = 0.02; // grant treasury target floor as a fraction of collateral
+        public double CentralBankGrantMemberWealthFraction = 1.0; // purely additive vs the current TuneVersion, so no bump. Share of a player faction's members' own wallet balances counted as faction liquidity against its grant target; 0 ignores them
         public TimeSpan CentralBankGrantCooldown = TimeSpan.FromMinutes(1); // minimum time between grants to the same faction
         // Lending-standard gate on new support-loan issuance: a bank shouldn't keep extending debt once
         // the resulting interest would outrun what the faction actually earns. Periods are expressed in

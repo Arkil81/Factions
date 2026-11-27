@@ -220,6 +220,101 @@ RING = [
 ]
 
 
+# --------------------------------------------------------------------------
+# node stage shells (docs/fog-of-war.md -> Economic stage). Drawn BEHIND the ore glyph, at the
+# station marker's size: filled in relation colour once identified, with the ore glyph dark on
+# top; an outline in grey below Identity, with the glyph in the same grey.
+# --------------------------------------------------------------------------
+
+OUTLINE_W = 4.5
+
+
+def hex_points(c, r, phase=-math.pi / 2):
+    return [(c + r * math.cos(phase + i * math.pi / 3), c + r * math.sin(phase + i * math.pi / 3))
+            for i in range(6)]
+
+
+def paint(ctx, outline):
+    if outline:
+        ctx.set_line_width(OUTLINE_W)
+        ctx.set_line_join(cairo.LINE_JOIN_ROUND)
+        ctx.stroke()
+    else:
+        ctx.fill()
+
+
+def arms(ctx, c, r_from, r_to, width, outline):
+    """Three docking arms at the hexagon's lower and upper-side vertices."""
+    for ang in (-math.pi / 2, math.pi / 6, 5 * math.pi / 6):
+        ux, uy = math.cos(ang), math.sin(ang)
+        px, py = -uy * width / 2, ux * width / 2
+        pts = [(c + ux * r_from + px, c + uy * r_from + py),
+               (c + ux * r_to + px, c + uy * r_to + py),
+               (c + ux * r_to - px, c + uy * r_to - py),
+               (c + ux * r_from - px, c + uy * r_from - py)]
+        ctx.new_path()
+        rounded_poly(ctx, pts, 1.5)
+        paint(ctx, outline)
+
+
+def stage_outpost(outline):
+    def draw(ctx):
+        """A platform bar under the ore glyph, on two short struts."""
+        ctx.new_path()
+        rounded_poly(ctx, [(6, 50), (58, 50), (58, 59), (6, 59)], 3)
+        paint(ctx, outline)
+        for x in (16, 48):
+            ctx.new_path()
+            rounded_poly(ctx, [(x - 3, 43), (x + 3, 43), (x + 3, 50), (x - 3, 50)], 1)
+            paint(ctx, outline)
+    return draw
+
+
+def stage_settlement(outline):
+    def draw(ctx):
+        """A hexagonal station shell."""
+        ctx.new_path()
+        rounded_poly(ctx, hex_points(32, 27 if outline else 29), 4)
+        paint(ctx, outline)
+    return draw
+
+
+def stage_hub(outline):
+    def draw(ctx):
+        """A smaller shell with three docking arms."""
+        arms(ctx, 32, 18, 31, 8, outline)
+        ctx.new_path()
+        rounded_poly(ctx, hex_points(32, 22 if outline else 23), 4)
+        paint(ctx, outline)
+    return draw
+
+
+def stage_capital(outline):
+    def draw(ctx):
+        """The hub inside an outer crown ring."""
+        arms(ctx, 32, 15, 25, 7, outline)
+        ctx.new_path()
+        rounded_poly(ctx, hex_points(32, 18 if outline else 19), 3)
+        paint(ctx, outline)
+        ctx.new_path()
+        ctx.set_line_width(4.0)
+        ctx.arc(32, 32, 29.0, 0, 2 * math.pi)
+        ctx.stroke()
+    return draw
+
+
+STAGE = [
+    ("stage_outpost", stage_outpost(False)),
+    ("stage_settlement", stage_settlement(False)),
+    ("stage_hub", stage_hub(False)),
+    ("stage_capital", stage_capital(False)),
+    ("stage_outpost_outline", stage_outpost(True)),
+    ("stage_settlement_outline", stage_settlement(True)),
+    ("stage_hub_outline", stage_hub(True)),
+    ("stage_capital_outline", stage_capital(True)),
+]
+
+
 FLEET = [
     ("fleet_raid", draw_raid),
     ("fleet_guard", draw_guard),
@@ -425,6 +520,15 @@ def main():
         ok, detail = verify_premultiplied(p)
         results.append((name + ".png", ok, detail))
         entries.append((name.replace("echelon_", "ech "), img, ECHELON_SIZE, ECHELON_SCREEN))
+
+    for name, fn in STAGE:
+        mask = render_mask(fn, FLEET_SIZE)
+        img = mask_to_image(mask, FLEET_SIZE)
+        p = os.path.join(OUT, name + ".png")
+        write_png(img, p)
+        ok, detail = verify_premultiplied(p)
+        results.append((name + ".png", ok, detail))
+        entries.append((name.replace("stage_", "").replace("_outline", " o"), img, FLEET_SIZE, FLEET_SCREEN))
 
     for name, fn in RING:
         mask = render_mask(fn, FLEET_SIZE)

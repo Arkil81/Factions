@@ -173,6 +173,7 @@ public class ScannerComponent : MySessionComponentBase
             case 6: return "FuelDepot";
             case 7: return "Fleet";
             case 8: return "RaidEngagement";
+            case 9: return "Grid";
             default: return "Kind" + kind;
         }
     }
@@ -471,6 +472,10 @@ public class ScannerComponent : MySessionComponentBase
 
     private const string OffScreenTexture = "Textures\\HUD\\marker_gps.dds";
 
+    /// <summary>A grid the sim does not own: SE's own grid marker, tinted by relation like every
+    /// other contact. The map draws the same texture for the same grid.</summary>
+    internal const string GridTexture = "Textures\\HUD\\marker_friendly.dds";
+
     /// <summary>What a convoy draws when this client could not write its own icon art to disk.
     /// Stock SE, so it cannot fail for the same reason the art did.</summary>
     private const string FleetFallbackTexture = "Textures\\HUD\\marker_alert.dds";
@@ -504,6 +509,7 @@ public class ScannerComponent : MySessionComponentBase
             case 4: return "Textures\\GUI\\Icons\\ore_H2O_ice.dds";          // IceField
             case 5: return "Textures\\GUI\\Icons\\filter_ingot.dds";         // Refinery (ingots = its output)
             case 6: return "Textures\\GUI\\Icons\\filter_hydrogen.dds";      // FuelDepot
+            case FactionsWire.ContactKindGrid: return GridTexture;
             default: return "Textures\\HUD\\marker_gps.dds";
         }
     }
@@ -530,6 +536,9 @@ public class ScannerComponent : MySessionComponentBase
         public double LostAt;
 
         private bool _moving;
+        /// <summary>Whether the destination was offered. Without it the contact coasts on its
+        /// velocity for a pass instead of stopping at a target it was never told.</summary>
+        private bool _hasTarget;
         private Vector3D _velocityMPerSec;
         private Vector3D _targetM;
         private double _sampledAtSeconds;
@@ -555,7 +564,8 @@ public class ScannerComponent : MySessionComponentBase
                     w.VelYKmPerMin * KmPerMinToMPerSec,
                     w.VelZKmPerMin * KmPerMinToMPerSec)
                 : Vector3D.Zero;
-            _targetM = _moving
+            _hasTarget = _moving && w.HasTarget;
+            _targetM = _hasTarget
                 ? new Vector3D(w.TargetXKm * 1000.0, w.TargetYKm * 1000.0, w.TargetZKm * 1000.0)
                 : Vector3D.Zero;
             _sampledAtSeconds = NowSeconds();
@@ -581,6 +591,15 @@ public class ScannerComponent : MySessionComponentBase
             if (!_moving) return PositionM;
 
             double x, y, z;
+            if (!_hasTarget)
+            {
+                DeadReckon.ExtrapolateOpen(
+                    PositionM.X, PositionM.Y, PositionM.Z,
+                    _velocityMPerSec.X, _velocityMPerSec.Y, _velocityMPerSec.Z,
+                    NowSeconds() - _sampledAtSeconds,
+                    out x, out y, out z);
+                return new Vector3D(x, y, z);
+            }
             DeadReckon.Extrapolate(
                 PositionM.X, PositionM.Y, PositionM.Z,
                 _velocityMPerSec.X, _velocityMPerSec.Y, _velocityMPerSec.Z,

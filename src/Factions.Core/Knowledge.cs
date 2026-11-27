@@ -202,16 +202,49 @@ namespace Factions.Core
             Vec3 sensorPosKm, double sensorStrengthKm, Vec3 targetPosKm, double signatureFactor,
             double targetBroadcastKm, SensorOcclusion occlusion)
         {
+            return Measure(sensorPosKm, sensorStrengthKm, targetPosKm, signatureFactor,
+                           targetBroadcastKm, occlusion, false).Detected;
+        }
+
+        /// <summary>
+        /// The same test as <see cref="Detects(Vec3,double,Vec3,double,double,SensorOcclusion)"/>,
+        /// with the signal-to-noise margin beside the verdict (<see cref="SensorReading"/>). The
+        /// detection verdict is the one <c>Detects</c> returns, because <c>Detects</c> is this.
+        ///
+        /// <para>The margin costs a square root and a logarithm, so it is computed only for a pair
+        /// that the sensor half actually sees, and only when <paramref name="withMargin"/> asks. The
+        /// knowledge sweep calls through <c>Detects</c> and pays for neither.</para>
+        /// </summary>
+        public static SensorReading Measure(
+            Vec3 sensorPosKm, double sensorStrengthKm, Vec3 targetPosKm, double signatureFactor,
+            double targetBroadcastKm, SensorOcclusion occlusion, bool withMargin = true)
+        {
             double range = DetectionRangeKm(sensorStrengthKm, signatureFactor);
             double broadcast = sensorStrengthKm > 0 && targetBroadcastKm > 0 ? targetBroadcastKm : 0;
             double outer = range > broadcast ? range : broadcast;
-            if (outer <= 0) return false;
+            if (outer <= 0) return SensorReading.NotDetected;
 
             double distanceSq = DistanceSquared(sensorPosKm, targetPosKm);
-            if (distanceSq > outer * outer) return false;
-            if (broadcast > 0 && distanceSq <= broadcast * broadcast) return true;
-            if (occlusion != null && !occlusion.IsClear(sensorPosKm, targetPosKm)) return false;
-            return distanceSq <= range * range;
+            if (distanceSq > outer * outer) return SensorReading.NotDetected;
+            bool inBroadcast = broadcast > 0 && distanceSq <= broadcast * broadcast;
+
+            // The sensor half on its own: in range on signature, and a clear line. Without a margin
+            // to compute, a pair already inside the broadcast floor needs no geometry, which keeps
+            // Detects exactly as cheap as it was.
+            bool sensorSees = distanceSq <= range * range;
+            if (sensorSees && (withMargin || !inBroadcast)
+                && occlusion != null && !occlusion.IsClear(sensorPosKm, targetPosKm))
+                sensorSees = false;
+
+            if (!sensorSees && !inBroadcast) return SensorReading.NotDetected;
+            return new SensorReading
+            {
+                Detected = true,
+                SensorSees = sensorSees,
+                MarginDb = sensorSees && withMargin
+                    ? IntelGrade.MarginDb(range, Math.Sqrt(distanceSq))
+                    : double.NegativeInfinity
+            };
         }
 
         /// <summary>Sensor strength of an owned node: a passive envelope every station has, widened
@@ -311,6 +344,24 @@ namespace Factions.Core
         public string OwnerTag;
         public double HoldStrength;
         public double ResourceValue;
+        /// <summary>The best tier this node was read at (docs/fog-of-war.md → Remembered grades).
+        /// <see cref="IntelTier.None"/> means never graded: a legacy entry, which reads as
+        /// Identity (<see cref="KnowledgeView.GradeOf"/>).</summary>
+        public IntelTier Tier;
+        /// <summary>The stage seen at that reading; <see cref="NodeStage.None"/> below Class.</summary>
+        public NodeStage Stage;
+        /// <summary>When <see cref="Tier"/> was read.</summary>
+        public DateTime GradedUtc;
+        /// <summary>The defence band at the last reading at Armament or better. Kept apart from the
+        /// grade: a later, worse reading replaces the grade once it is stale but cannot read defence,
+        /// so the band stays with its own age rather than being forgotten.</summary>
+        public DefenceBand Defence;
+        /// <summary>When <see cref="Defence"/> was read.</summary>
+        public DateTime DefenceUtc;
+        /// <summary>The scanned defence behind <see cref="Defence"/>, in the gate's DPS. Server-side
+        /// only: the Factions page sums it into a faction's strength band, and it never reaches the
+        /// wire.</summary>
+        public float DefenceDps;
     }
 
     public sealed class FactionKnowledge
@@ -338,17 +389,90 @@ namespace Factions.Core
         /// every later one renews it and overwrites the detail with the fresher observation.</summary>
         public void Touch(SpatialNode node, DateTime utc)
         {
+            Touch(node, utc, IntelTier.None, NodeStage.None, TimeSpan.Zero);
+        }
+
+        public void Touch(SpatialNode node, DateTime utc, IntelTier tier, NodeStage stage, TimeSpan staleAfter)
+        {
+            Touch(node, utc, tier, stage, staleAfter, DefenceBand.Unknown);
+        }
+
+        /// <summary>
+        /// A detection that also carries a grade. The detail (owner, hold, value) is always the
+        /// freshest reading; the grade is kept by the rule in docs/fog-of-war.md → Remembered
+        /// grades: replaced when the new tier is at least the held one, or when the held one is
+        /// older than <paramref name="staleAfter"/>. A non-positive <paramref name="staleAfter"/>
+        /// never ages a grade out. <see cref="IntelTier.None"/> leaves the held grade alone.
+        /// <paramref name="defence"/> is recorded only from a reading at Armament or better, and
+        /// replaces the held band whenever it is the newer reading.
+        /// </summary>
+        public void Touch(SpatialNode node, DateTime utc, IntelTier tier, NodeStage stage, TimeSpan staleAfter,
+                          DefenceBand defence)
+        {
+            Touch(node, utc, tier, stage, staleAfter, new DefenceReading { Band = defence });
+        }
+
+        /// <summary>As above, with the reading's DPS kept beside its band.</summary>
+        public void Touch(SpatialNode node, DateTime utc, IntelTier tier, NodeStage stage, TimeSpan staleAfter,
+                          DefenceReading reading)
+        {
+            DefenceBand defence = reading.Band;
             if (node == null || string.IsNullOrEmpty(node.Id)) return;
+            // Full is a relation, not an observation: what is remembered is what a sensor read,
+            // so a player who leaves the faction keeps a scan, not the books.
+            if (tier > IntelTier.Armament) tier = IntelTier.Armament;
             KnownNode existing;
-            if (_entries.TryGetValue(node.Id, out existing) && existing.LastSeenUtc >= utc) return;
-            _entries[node.Id] = new KnownNode
+            bool had = _entries.TryGetValue(node.Id, out existing);
+            if (had && existing.LastSeenUtc > utc) return;
+            if (had && existing.LastSeenUtc == utc && !Improves(existing, tier, utc, staleAfter)
+                && !(defence != DefenceBand.Unknown && tier >= IntelTier.Armament)) return;
+            var entry = new KnownNode
             {
                 LastSeenUtc = utc,
                 HasDetail = true,
                 OwnerTag = node.OwnerFactionTag,
                 HoldStrength = node.HoldStrength,
                 ResourceValue = node.ResourceValue,
+                Tier = had ? existing.Tier : IntelTier.None,
+                Stage = had ? existing.Stage : NodeStage.None,
+                GradedUtc = had ? existing.GradedUtc : default(DateTime),
+                Defence = had ? existing.Defence : DefenceBand.Unknown,
+                DefenceUtc = had ? existing.DefenceUtc : default(DateTime),
+                DefenceDps = had ? existing.DefenceDps : 0f,
             };
+            if (defence != DefenceBand.Unknown && tier >= IntelTier.Armament && utc >= entry.DefenceUtc)
+            {
+                entry.Defence = defence;
+                entry.DefenceUtc = utc;
+                entry.DefenceDps = reading.Dps;
+            }
+            if (Improves(existing, tier, utc, staleAfter) || !had)
+            {
+                if (tier != IntelTier.None)
+                {
+                    entry.Tier = tier;
+                    entry.Stage = tier >= IntelTier.Class ? stage : NodeStage.None;
+                    entry.GradedUtc = utc;
+                }
+            }
+            _entries[node.Id] = entry;
+        }
+
+        private static bool Improves(KnownNode held, IntelTier tier, DateTime utc, TimeSpan staleAfter)
+        {
+            if (tier == IntelTier.None) return false;
+            if (held.Tier == IntelTier.None || tier >= held.Tier) return true;
+            return staleAfter > TimeSpan.Zero && utc - held.GradedUtc >= staleAfter;
+        }
+
+        /// <summary>The grade held for a live entry, or false when there is no live entry.</summary>
+        public bool TryGetGrade(string nodeId, DateTime nowUtc, TimeSpan horizon, out KnownNode entry)
+        {
+            entry = default(KnownNode);
+            if (string.IsNullOrEmpty(nodeId)) return false;
+            if (!_entries.TryGetValue(nodeId, out entry)) return false;
+            if (horizon > TimeSpan.Zero && nowUtc - entry.LastSeenUtc >= horizon) return false;
+            return true;
         }
 
         /// <summary>Records a detection that carries only a timestamp -- the player scanner's shape,
@@ -500,6 +624,54 @@ namespace Factions.Core
                 for (int i = 0; i < sources.Count; i++)
                     if (sources[i] != null && sources[i].HasLive(nodeId, nowUtc, horizon)) return true;
             return IsBirthright(graph, ownerTag, nodeId, birthrightRangeKm);
+        }
+
+        /// <summary>
+        /// What a viewer has learned about a node they know: the best tier across their stores,
+        /// ties to the freshest reading (docs/fog-of-war.md → Remembered grades, union at read).
+        ///
+        /// <para>Their own estate is <see cref="IntelTier.Full"/>. A node known with no grade -- a
+        /// legacy entry, or the birthright floor with no entry at all -- reads as
+        /// <see cref="IntelTier.Identity"/> with no stage, which is what the map drew for it before
+        /// grades existed; the caller fills the stage in live. Call only for a node the viewer is
+        /// already known to know: this does not re-run the discovery test.</para>
+        /// </summary>
+        public static KnownNode GradeOf(
+            string ownerTag, IList<FactionKnowledge> sources, SpatialNode node, DateTime nowUtc, TimeSpan horizon)
+        {
+            if (node != null && !string.IsNullOrEmpty(ownerTag) && node.OwnerFactionTag == ownerTag)
+                return new KnownNode { Tier = IntelTier.Full };
+            var best = new KnownNode { Tier = IntelTier.None };
+            if (sources != null && node != null)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    KnownNode entry;
+                    if (sources[i] == null || !sources[i].TryGetGrade(node.Id, nowUtc, horizon, out entry)) continue;
+                    if (entry.Tier == IntelTier.None) continue;
+                    if (entry.Tier < best.Tier) continue;
+                    if (entry.Tier == best.Tier && entry.GradedUtc <= best.GradedUtc) continue;
+                    best = entry;
+                }
+            }
+            if (best.Tier == IntelTier.None) best = new KnownNode { Tier = IntelTier.Identity };
+            // The defence is the freshest band across the stores, whichever store holds the grade.
+            best.Defence = DefenceBand.Unknown;
+            best.DefenceUtc = default(DateTime);
+            best.DefenceDps = 0f;
+            if (sources != null && node != null)
+            {
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    KnownNode entry;
+                    if (sources[i] == null || !sources[i].TryGetGrade(node.Id, nowUtc, horizon, out entry)) continue;
+                    if (entry.Defence == DefenceBand.Unknown || entry.DefenceUtc <= best.DefenceUtc) continue;
+                    best.Defence = entry.Defence;
+                    best.DefenceUtc = entry.DefenceUtc;
+                    best.DefenceDps = entry.DefenceDps;
+                }
+            }
+            return best;
         }
 
         public static HashSet<string> KnownNodeIdsFor(
@@ -729,7 +901,8 @@ namespace Factions.Core
         /// broad-phase is a conservative superset that the exact per-node test then filters.</para></summary>
         public static int SweepOwnedNodes(
             SpatialGraph graph, NodeProximityIndex index, FactionState state,
-            FactionTuning tuning, DateTime nowUtc, SensorOcclusion occlusion = null)
+            FactionTuning tuning, DateTime nowUtc, SensorOcclusion occlusion = null, NodeStages stages = null,
+            Func<SpatialNode, DefenceReading> defenceOf = null)
         {
             if (graph == null || index == null || state == null || tuning == null) return 0;
             var candidates = new List<SpatialNode>();
@@ -746,10 +919,10 @@ namespace Factions.Core
                     SpatialNode target = candidates[i];
                     if (target == null || NodeContent.IsEmptySpace(target)) continue;
                     if (target.OwnerFactionTag == state.Tag) continue;   // already known by ownership
-                    if (!Sensing.Detects(sensor.Position, strength, target.Position,
-                                         Signature.ForNode(target), 0.0, occlusion))
-                        continue;
-                    state.Knowledge.Touch(target, nowUtc);
+                    SensorReading reading = Sensing.Measure(sensor.Position, strength, target.Position,
+                                                            Signature.ForNode(target), 0.0, occlusion);
+                    if (!reading.Detected) continue;
+                    TouchGraded(state, target, reading, nowUtc, tuning, stages, defenceOf);
                     touched++;
                 }
             }
@@ -773,7 +946,8 @@ namespace Factions.Core
             SpatialGraph graph, NodeProximityIndex index, FactionState state,
             Vec3 fromKm, Vec3 toKm, FactionTuning tuning, DateTime nowUtc,
             List<SpatialNode> scratch = null, HashSet<string> scratchSeen = null,
-            SensorOcclusion occlusion = null)
+            SensorOcclusion occlusion = null, NodeStages stages = null,
+            Func<SpatialNode, DefenceReading> defenceOf = null)
         {
             if (graph == null || index == null || state == null || tuning == null) return 0;
             double strength = tuning.SensorFleetRangeKm;
@@ -790,10 +964,31 @@ namespace Factions.Core
                 if (!Sensing.DetectsSwept(fromKm, toKm, strength, target.Position,
                                           Signature.ForNode(target), occlusion))
                     continue;
-                state.Knowledge.Touch(target, nowUtc);
+                // Graded at the closest approach along the leg, which is where the fleet saw it best.
+                double range = Sensing.DetectionRangeKm(strength, Signature.ForNode(target));
+                double closest = Math.Sqrt(Sensing.DistanceToSegmentSquared(target.Position, fromKm, toKm));
+                var reading = new SensorReading
+                {
+                    Detected = true, SensorSees = true, MarginDb = IntelGrade.MarginDb(range, closest)
+                };
+                TouchGraded(state, target, reading, nowUtc, tuning, stages, defenceOf);
                 touched++;
             }
             return touched;
+        }
+
+        /// <summary>The faction half of the remembered grade: the margin, plus the station
+        /// transponder (a station squawks; a bare field does not). Brains do not read grades -- the
+        /// player map reads a player faction's store, which is what this is for. At Armament the
+        /// reading also takes the defence band, from the gate's own figure.</summary>
+        private static void TouchGraded(FactionState state, SpatialNode target, SensorReading reading,
+                                        DateTime nowUtc, FactionTuning tuning, NodeStages stages,
+                                        Func<SpatialNode, DefenceReading> defenceOf)
+        {
+            IntelTier tier = IntelGrade.Of(reading, IntelTier.None, false, target.StableStationId != 0, tuning);
+            NodeStage stage = stages != null ? stages.Of(target) : NodeStage.None;
+            DefenceReading defence = tier >= IntelTier.Armament && defenceOf != null ? defenceOf(target) : default(DefenceReading);
+            state.Knowledge.Touch(target, nowUtc, tier, stage, IntelGrade.StaleAfter(tuning), defence);
         }
     }
 }

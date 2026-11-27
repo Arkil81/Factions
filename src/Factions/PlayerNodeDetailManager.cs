@@ -157,25 +157,41 @@ namespace Factions
             if (!_runtime.World.Graph.Nodes.TryGetValue(nodeId, out node) || node == null)
                 return new WireNodeDetail { Exists = false, Id = nodeId };
 
-            NodeBelief belief = Believe(viewerIdentityId, node);
+            NodeBelief belief;
+            IntelTier tier;
+            DefenceBand defence;
+            DateTime defenceUtc;
+            if (!TryBelieve(viewerIdentityId, node, out belief, out tier, out defence, out defenceUtc))
+                return new WireNodeDetail { Exists = false, Id = nodeId };
+            int defenceAge = 0;
+            if (defence != DefenceBand.Unknown)
+            {
+                double seconds = (_runtime.World.UtcNow - defenceUtc).TotalSeconds;
+                defenceAge = seconds <= 0 ? 0 : seconds >= int.MaxValue ? int.MaxValue : (int)seconds;
+            }
             string ownerTag = belief.OwnerTag;
             bool claimable = NeutralFaction.IsClaimable(ownerTag);
+            bool identified = IntelGrade.ShowsIdentity(tier);
+            bool classed = IntelGrade.ShowsClass(tier);
 
             var detail = new WireNodeDetail
             {
                 Exists = true,
                 Id = node.Id,
-                DisplayName = node.DisplayName,
-                DominantOre = NodeDisplay.DominantOre(node),
-                Surveyed = NodeDisplay.Surveyed(node),
-                Zone = (byte)node.Zone,
-                OwnerTag = claimable ? "" : ownerTag,
-                Relation = (byte)_relations.For(ownerTag, viewerIdentityId, claimable),
-                HasStation = node.StableStationId != 0,
+                Tier = (byte)tier,
+                Defence = (byte)defence,
+                DefenceAgeSeconds = defenceAge,
+                DisplayName = identified ? node.DisplayName : "",
+                DominantOre = classed ? NodeDisplay.DominantOre(node) : "",
+                Surveyed = classed && NodeDisplay.Surveyed(node),
+                Zone = classed ? (byte)node.Zone : (byte)0,
+                OwnerTag = identified && !claimable ? ownerTag : "",
+                Relation = (byte)(identified ? _relations.For(ownerTag, viewerIdentityId, claimable) : WireRelation.Unknown),
+                HasStation = classed && node.StableStationId != 0,
                 XKm = node.Position.X,
                 YKm = node.Position.Y,
                 ZKm = node.Position.Z,
-                HoldStrength = belief.HoldStrength,
+                HoldStrength = identified ? belief.HoldStrength : 0,
             };
             // Above the ownership seam: a safe zone is a bubble anyone standing near it can see,
             // and a defender reading this window during a raid is who needs it most.
@@ -966,28 +982,38 @@ namespace Factions
         /// discovery gate of its own: it answers any node id a client asks for. That is its own
         /// defect and its own fix (FAC-359); until then this must not pretend to a gate it does not
         /// have.</para></summary>
-        private NodeBelief Believe(long viewerIdentityId, SpatialNode node)
+        /// <summary>
+        /// What the viewer believes about a node, through the same seam as the map. False when they
+        /// do not know it at all, which the window answers as <c>Exists = false</c>: an undiscovered
+        /// node is indistinguishable from no node, so the id space cannot be walked for intel.
+        /// </summary>
+        private bool TryBelieve(long viewerIdentityId, SpatialNode node, out NodeBelief belief,
+                                out IntelTier tier, out DefenceBand defence, out DateTime defenceUtc)
         {
+            defence = DefenceBand.Unknown;
+            defenceUtc = default(DateTime);
             ViewerKnowledge.BuildSources(_runtime, _scanner, viewerIdentityId, _viewerSources);
             string viewerTag = ViewerKnowledge.FactionTag(viewerIdentityId);
             DateTime nowUtc = _runtime.World.UtcNow;
-            NodeBelief belief;
-            if (ViewerKnowledge.IsDetected(_viewerSources, node.Id, nowUtc)
-                || !KnowledgeGate.TryBelief(
-                        _runtime.World.Graph, viewerTag, _viewerSources, node, nowUtc,
-                        _runtime.World.Tuning.DiscoveryHorizon, _runtime.World.Tuning.BirthrightRangeKm,
-                        out belief))
+            FactionTuning t = _runtime.World.Tuning;
+            tier = IntelTier.None;
+            if (!KnowledgeGate.TryBelief(_runtime.World.Graph, viewerTag, _viewerSources, node, nowUtc,
+                                         t.DiscoveryHorizon, t.BirthrightRangeKm, out belief))
+                return false;
+            bool detected = ViewerKnowledge.IsDetected(_viewerSources, node.Id, nowUtc);
+            if (detected)
             {
-                return new NodeBelief
-                {
-                    Node = node,
-                    OwnerTag = node.OwnerFactionTag,
-                    HoldStrength = node.HoldStrength,
-                    ResourceValue = node.ResourceValue,
-                    IsLive = true,
-                };
+                // A sensor has it now, so the world is the honest answer (the map's rule).
+                belief.OwnerTag = node.OwnerFactionTag;
+                belief.HoldStrength = node.HoldStrength;
+                belief.ResourceValue = node.ResourceValue;
+                belief.IsLive = true;
             }
-            return belief;
+            NodeStage stage;
+            tier = PlayerMapManager.GradeNode(viewerTag, _viewerSources, node, detected, null, nowUtc,
+                                              t.DiscoveryHorizon, out stage, _runtime.NodeDefence,
+                                              out defence, out defenceUtc);
+            return true;
         }
 
         private FactionState ViewerFaction(long identityId)

@@ -85,7 +85,8 @@ time, but it only becomes a real ship in the game world when a player is within 
 You are told about fleets near you. Within a few kilometres, a message such as *A [TAG] raiding
 fleet has launched, bound for (place)!* tells you what is going on. With the client plugin, the
 traffic-control radio voice announces arrivals, departures and hostile fleets instead, and the
-scanner marks fleets on your HUD.
+scanner marks fleets on your HUD. What those markers mean is in
+[Reading a fleet marker](finding-your-way.md#reading-a-fleet-marker).
 
 ### Why an NPC ship attacked you
 

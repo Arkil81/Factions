@@ -35,7 +35,7 @@ namespace Factions
     /// other plugins yet. It owns the persistent registry (Factions.Core <see cref="FactionStore"/>)
     /// and the SE-facing host features. The decision scheduler lands in Update() next.
     /// </summary>
-    public class FactionsPlugin : TorchPluginBase
+    public partial class FactionsPlugin : TorchPluginBase
     {
         public const string PluginName = "Factions";
 
@@ -155,6 +155,8 @@ namespace Factions
         private Factions.Core.MarketMemory _marketMemory;
         private PlayerAssetsManager   _playerAssetsManager;
         private PlayerNodeDetailManager _playerNodeDetailManager;
+        private PlayerFactionIntelManager _playerFactionIntelManager;
+        private OfflineRaidMonitor _offlineRaidMonitor;
         private PlayerNodeTransferManager _playerNodeTransferManager;
         private PlayerShipAssetsManager _playerShipAssetsManager;
         private DockSupplyManager _dockSupplyManager;
@@ -274,6 +276,8 @@ namespace Factions
             DampenerProbe.TryPatch(_harmony);
             // MyCubeGrid.UpdatePredictionFlag: a controlled grid with no physics is skipped, not fatal.
             PredictionFlagGuard.TryPatch(_harmony);
+            // NGPlugin's grid transfer and loose-character send, bound by name; nothing without Nexus.
+            NexusLeftoverPilotGuard.TryPatch(_harmony);
             // MyLandingGear lock/reattach/release: 'factions debug landing'. The client runs the same probe.
             LandingProbe.TryPatch(_harmony, "server", () => DebugTraces.Landing, line => Log.Info(line),
                                   new[] { 0.25, 1.0 });
@@ -771,6 +775,9 @@ namespace Factions
                           // path; a relayed client reaches it here, its identity resolved by
                           // LinkedViewers.
                           | Factions.Wire.WireFeatures.Diplomacy
+                          // The Factions page Overview: read-only estimates of a named faction from
+                          // the viewer's own stores; relayable, it touches no entity in the sector.
+                          | Factions.Wire.WireFeatures.FactionIntel
                           // Wing actions on antennas. Granted here and not on the agent path, and
                           // stripped from a relayed client: the antenna and the hulls it commands are
                           // entities in the caller's own sector.
@@ -803,12 +810,16 @@ namespace Factions
                 _munitionSpeedManager = new MunitionSpeedManager(_tuning, _uplinkManager,
                     line => { if (_decisionLog != null) _decisionLog.Write(line); });
                 CrewIntruders.Sink = line => { if (_decisionLog != null) _decisionLog.Write(line); };
+                _offlineRaidMonitor = new OfflineRaidMonitor(_runtime, _playerIndexWriter,
+                    line => { if (_decisionLog != null) _decisionLog.Write(line); });
                 _playerScannerManager = new PlayerScannerManager(_runtime, StorageDir, _uplinkManager);
                 _trespassHailer = new TrespassHailer(_runtime,
                     line => { if (_decisionLog != null) _decisionLog.Write(line); });
                 _trespassHailer.RemoteChat = (steam, author, text, font) =>
                     QueueRemoteChat(steam, text, font, author, false);
                 _playerMapManager = new PlayerMapManager(_runtime, _uplinkManager, _playerScannerManager);
+                _playerScannerManager.Grids = ScannerGridsNow;
+                _playerMapManager.Grids = ScannerGridsNow;
                 _playerExpandManager = new PlayerExpandManager(_runtime, _uplinkManager);
                 _playerAssetsManager = new PlayerAssetsManager(_runtime, _uplinkManager);
                 _playerNodeDetailManager = new PlayerNodeDetailManager(_runtime, _uplinkManager, _playerScannerManager,
@@ -826,6 +837,7 @@ namespace Factions
                 _playerShelfManager = new PlayerShelfManager(_runtime, _uplinkManager);
                 _playerBankSalesManager = new PlayerBankSalesManager(_runtime, _uplinkManager);
                 _playerDiplomacyManager = new PlayerDiplomacyManager(_runtime, _uplinkManager);
+                _playerFactionIntelManager = new PlayerFactionIntelManager(_runtime, _uplinkManager, _playerScannerManager);
                 _playerWingManager = new PlayerWingManager(_runtime, _uplinkManager);
                 _playerCrewOrderManager = new PlayerCrewOrderManager(_uplinkManager);
                 _combatOutcomeNotices = new CombatOutcomeNotices(_runtime, _uplinkManager);
@@ -3588,6 +3600,9 @@ namespace Factions
             try { _playerDiplomacyManager?.Close(); }
             catch (Exception ex) { Log.Warn(ex, "Player diplomacy manager close failed."); }
             _playerDiplomacyManager = null;
+            _playerFactionIntelManager = null;
+            _offlineRaidMonitor?.Close();
+            _offlineRaidMonitor = null;
             try { _playerWingManager?.Close(); }
             catch (Exception ex) { Log.Warn(ex, "Player wing manager close failed."); }
             _playerWingManager = null;
@@ -3966,7 +3981,24 @@ namespace Factions
                 _sampledThisPass.Add(id);
             }
 
+            // Every other grid the scanner can list: vanilla NPC and unowned group leads. Player-owned
+            // leads were sampled above.
+            for (int i = 0; i < _hullGroups.Count; i++)
+            {
+                MyCubeGrid grid = _hullGroups[i].Lead;
+                if (grid == null || grid.MarkedForClose) continue;
+                long id = grid.EntityId;
+                _liveGrids.Add(id);
+                if (_sampledThisPass.Contains(id)) continue;
+                DateTime last;
+                if (throttle > 0 && _gridSampledAt.TryGetValue(id, out last)
+                    && (now - last).TotalSeconds < throttle) continue;
+                SampleGrid(grid, 0, tuning, now);
+                _sampledThisPass.Add(id);
+            }
+
             PruneGridStores();
+            BuildScannerGrids();
 
             // Cost, where the population that drives it is visible next to it. Behind the same
             // toggle as the acquire/lose lines, and the string is built only when it is on.
@@ -3975,6 +4007,7 @@ namespace Factions
                 double ms = (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
                 _decisionLog.Write("SENSE_SAMPLE seated=" + seated
                            + " owned=" + _ownedGrids.Count
+                           + " hulls=" + _hullGroups.Count
                            + " sampled=" + _sampledThisPass.Count
                            + " tracked=" + _gridSignature.Count
                            + " ms=" + ms.ToString("0.00", CultureInfo.InvariantCulture));
@@ -4149,10 +4182,12 @@ namespace Factions
                 if (grid == null || grid.MarkedForClose || grid.IsPreview || grid.Projector != null)
                     return false;
                 if (grid.BlocksCount < minBlocks) return false;
+                CollectHull(grid);
                 if (!GridReaper.IsPlayerOwned(players, grid)) return false;
                 _ownedGrids.Add(grid);
                 return false;
             });
+            RebuildHullGroups();
         }
 
         /// <summary>Drops per-grid state for grids that are gone. Keyed on the live set this pass
@@ -5224,7 +5259,7 @@ namespace Factions
                 NexusWalletTransfer t = fresh[i];
                 if (t.From != null && _runtime.FindFaction(t.From) != null)
                 {
-                    world.Spend(t.From, t.Amount);
+                    world.BookMemberWithdrawal(t.From, t.Amount);
                     Log.Info("Faction ledger debited " + t.Amount + " for " + t.From + " (terminal withdrawal on server " + home + ")");
                 }
                 if (t.To != null && _runtime.FindFaction(t.To) != null)
@@ -5772,6 +5807,8 @@ namespace Factions
                     catch (Exception ex) { Log.Warn(ex, "Player assets tick failed."); }
                     try { _playerNodeDetailManager?.Tick(); }
                     catch (Exception ex) { Log.Warn(ex, "Player node detail tick failed."); }
+                    try { _offlineRaidMonitor?.Tick(); }
+                    catch (Exception ex) { Log.Warn(ex, "Offline raid monitor tick failed."); }
                     try { _playerEventsManager?.Tick(); }
                     catch (Exception ex) { Log.Warn(ex, "Player events tick failed."); }
                     try { _playerStandingOrdersManager?.Tick(); }
@@ -6616,6 +6653,18 @@ namespace Factions
                 case "debris":
                 {
                     result = HandleDebris(t);
+                    return true;
+                }
+                case "defence":
+                {
+                    result = _runtime == null ? "defence: runtime not started (no session loaded)."
+                                              : _runtime.DescribeNodeDefence(t.Length > 2 ? t[2] : null);
+                    return true;
+                }
+                case "factionintel":
+                {
+                    result = _runtime == null ? "factionintel: runtime not started (no session loaded)."
+                                              : _runtime.DescribeFactionIntel();
                     return true;
                 }
                 case "fight":

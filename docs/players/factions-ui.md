@@ -26,7 +26,7 @@ its settings. In game, **Ctrl+Alt+/** opens Pulsar's plugin settings.
 | Scanner | (checkbox) | On | Draws scanner contacts on your HUD. |
 | Map | Open the map | M | The key that opens the map. |
 | Map | Station labels | On | Names on the map. |
-| Map | Fleet routes | On | Lines showing where fleets are going. |
+| Map | Fleet routes | On | Lines showing where your own and friendly fleets are going. |
 | Map | Empty nodes | Off | Also shows nodes with nothing built on them. |
 | Map | Planet markers | On | Rings and names planets and moons. |
 | Map | Exclusion sphere | Off | Shows the area that must be free of other nodes before you can create one where you are. |

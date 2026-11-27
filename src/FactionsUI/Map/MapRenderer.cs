@@ -308,6 +308,13 @@ internal sealed class MapRenderer
             // says so: the order is the one thing on this map the player put there themselves.
             string label = node.HasStation && node.HasDistinctName ? node.LabelText : null;
             bool labelCandidate = node.HasStation && node.HasDistinctName;
+            if (!node.Identified)
+            {
+                // Below Identity the stage is the one thing a word can say: once the name is
+                // resolved the label is the name and the stage lives in the icon.
+                label = node.HasStation ? NodeLabels.StageWord(node.Stage) : null;
+                labelCandidate = label != null;
+            }
             Factions.Wire.WireCampaign directive;
             if (campaigns != null && campaigns.TryGetDirectiveOn(node.Id, out directive))
             {
@@ -315,16 +322,23 @@ internal sealed class MapRenderer
                         + (directive.Kind == 1 ? "  [CONQUEST]" : directive.Kind == 2 ? "  [DEFEND]" : "  [RAID]");
                 labelCandidate = true;
             }
+            NodeIcon icon = NodeIconFor(node);
             Collect(node.PositionM, cameraPos, ref view, ref projection,
-                node.HasStation ? StationIconPixels : IconPixels,
+                icon.Shell != null || node.HasStation ? StationIconPixels : IconPixels,
                 Palette.KnowledgeColour(node.Relation, node.Detected),
-                NodeTexture(node),
+                icon.Glyph,
                 // Only a label that identifies the node is worth drawing -- see
                 // MapWorld.MarkDistinctNames for how a shared name earns its owner tag first.
                 label,
                 node.Id,
                 labelCandidate,
-                blocking);
+                blocking,
+                echelonTexture: DefencePips(node) > 0 ? IconStore.Texture("echelon_dot") : null,
+                echelonCount: DefencePips(node),
+                shellTexture: icon.Shell,
+                glyphScale: icon.GlyphScale,
+                glyphOffset: icon.GlyphOffset,
+                glyphDark: icon.GlyphDark);
         }
 
         for (int i = 0; i < world.Fleets.Count; i++)
@@ -338,7 +352,7 @@ internal sealed class MapRenderer
                 echelonTexture: IconStore.Texture(FleetIcons.TextureName(echelon.Glyph)),
                 echelonCount: echelon.Count);
 
-            if (Config.Current.MapShowRoutes)
+            if (Config.Current.MapShowRoutes && fleet.HasFlightPlan)
             {
                 bool selected = selectedId != null && selectedId == fleet.Key;
                 DrawRoute(fleet, position, cameraPos, cameraDistanceM, selected);
@@ -364,7 +378,8 @@ internal sealed class MapRenderer
     private void Collect(
         Vector3D worldPos, Vector3D cameraPos, ref MatrixD view, ref MatrixD projection,
         float iconPixels, Color colour, string texture, string label, string id, bool labelCandidate,
-        bool blocking = false, string echelonTexture = null, int echelonCount = 0)
+        bool blocking = false, string echelonTexture = null, int echelonCount = 0,
+        string shellTexture = null, float glyphScale = 1f, float glyphOffset = 0f, bool glyphDark = false)
     {
         Vector2 normalized;
         bool behind;
@@ -391,6 +406,10 @@ internal sealed class MapRenderer
             Blocking = blocking,
             EchelonTexture = echelonTexture,
             EchelonCount = echelonCount,
+            ShellTexture = shellTexture,
+            GlyphScale = glyphScale,
+            GlyphOffset = glyphOffset,
+            GlyphDark = glyphDark,
         });
     }
 
@@ -446,7 +465,19 @@ internal sealed class MapRenderer
             // reason. Bodies only: there are a handful of them, and the node icons are filled art.
             if (d.IsBody) DrawOutline(d.Texture, d.Normalized, iconSize, d.Colour, outline);
 
-            DrawIcon(d.Texture, d.Normalized, iconSize, d.Colour);
+            if (d.ShellTexture != null)
+            {
+                // The stage shell carries the relation colour; the ore glyph sits on it, dark on a
+                // filled shell and in the shell's own colour inside an outline.
+                DrawIcon(d.ShellTexture, d.Normalized, iconSize, d.Colour);
+                var glyphPos = new Vector2(d.Normalized.X, d.Normalized.Y - iconSize.Y * d.GlyphOffset);
+                Color glyphColour = d.GlyphDark ? new Color(GlyphOnShell, d.Colour.A / 255f) : d.Colour;
+                if (d.Texture != null) DrawIcon(d.Texture, glyphPos, iconSize * d.GlyphScale, glyphColour);
+            }
+            else
+            {
+                DrawIcon(d.Texture, d.Normalized, iconSize, d.Colour);
+            }
 
             if (d.EchelonTexture != null && d.EchelonCount > 0)
                 DrawEchelon(d, iconSize);
@@ -1200,8 +1231,65 @@ internal sealed class MapRenderer
     /// </summary>
     private static string FleetTexture(MapWorld.MapFleet fleet)
     {
+        if (fleet.IsGrid) return ScannerComponent.GridTexture;
         string art = IconStore.Texture(FleetIcons.TextureName(FleetIcons.GlyphFor(fleet.Kind)));
         return art ?? FleetMarkerFallback;
+    }
+
+    /// <summary>Pips over a node marker for its scanned defence: the band less one, none when it has
+    /// not been read. Drawn with the fleet strength marks' art and placement, so strength reads the
+    /// same way on both.</summary>
+    private static int DefencePips(MapWorld.MapNode node)
+    {
+        return node.Defence == (byte)WireDefenceBand.Unknown ? 0 : node.Defence - 1;
+    }
+
+    /// <summary>The ore glyph drawn dark on a filled stage shell.</summary>
+    private static readonly Color GlyphOnShell = new Color(12, 12, 16);
+
+    private struct NodeIcon
+    {
+        public string Glyph;
+        public string Shell;
+        public float GlyphScale;
+        public float GlyphOffset;
+        public bool GlyphDark;
+    }
+
+    /// <summary>
+    /// The node marker (docs/fog-of-war.md → Economic stage): the ore glyph, with the stage built
+    /// around it. Field is the bare glyph; Outpost puts it on a platform; Settlement, Hub and
+    /// Capital put it inside a station shell that grows with the stage. Filled once identified,
+    /// an outline below that. Below Class there is no stage and no ore to draw, so the marker is the
+    /// plain contact blip. Missing art falls back to the bare glyph, as the map drew before stages.
+    /// </summary>
+    private static NodeIcon NodeIconFor(MapWorld.MapNode node)
+    {
+        var icon = new NodeIcon { Glyph = NodeTexture(node), GlyphScale = 1f };
+        if (!node.Classed)
+        {
+            icon.Glyph = IconStore.Texture(FleetIcons.TextureName(FleetIcons.Glyph.Generic)) ?? icon.Glyph;
+            return icon;
+        }
+        string name;
+        float scale;
+        switch ((WireNodeStage)node.Stage)
+        {
+            case WireNodeStage.Outpost: name = "stage_outpost"; scale = 0.62f; break;
+            case WireNodeStage.Settlement: name = "stage_settlement"; scale = 0.52f; break;
+            case WireNodeStage.Hub: name = "stage_hub"; scale = 0.42f; break;
+            case WireNodeStage.Capital: name = "stage_capital"; scale = 0.34f; break;
+            default: return icon;
+        }
+        string shell = IconStore.Texture(node.Identified ? name : name + "_outline");
+        if (shell == null) return icon;
+        icon.Shell = shell;
+        icon.GlyphScale = scale;
+        bool outpost = node.Stage == (byte)WireNodeStage.Outpost;
+        // The platform sits under the glyph, so the glyph rides above centre and keeps its colour.
+        icon.GlyphOffset = outpost ? 0.14f : 0f;
+        icon.GlyphDark = node.Identified && !outpost;
+        return icon;
     }
 
     private static string NodeTexture(MapWorld.MapNode node)
@@ -1232,6 +1320,14 @@ internal sealed class MapRenderer
         public string EchelonTexture;
         /// <summary>How many times to repeat <see cref="EchelonTexture"/>.</summary>
         public int EchelonCount;
+        /// <summary>A node's stage shell, drawn under <see cref="Texture"/>; null for none.</summary>
+        public string ShellTexture;
+        /// <summary>The glyph's size against the marker when a shell is drawn.</summary>
+        public float GlyphScale;
+        /// <summary>How far above centre the glyph sits, as a fraction of the marker.</summary>
+        public float GlyphOffset;
+        /// <summary>Draw the glyph dark, on a filled shell.</summary>
+        public bool GlyphDark;
     }
 
     /// <summary>A planet the cursor found. Carries its own radius: what frames a body is its size,

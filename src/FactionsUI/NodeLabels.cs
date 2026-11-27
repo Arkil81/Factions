@@ -18,6 +18,45 @@ namespace FactionsUI;
 /// </summary>
 internal static class NodeLabels
 {
+    /// <summary>A scanned defence band as the panel and the node window write it: the word and the
+    /// pip count the map draws, with the reading's age when it has one. Null when not read.</summary>
+    public static string Defence(byte band, int ageSeconds)
+    {
+        string text;
+        switch ((Factions.Wire.WireDefenceBand)band)
+        {
+            case Factions.Wire.WireDefenceBand.Undefended: text = "undefended (0/3)"; break;
+            case Factions.Wire.WireDefenceBand.Light: text = "light (1/3)"; break;
+            case Factions.Wire.WireDefenceBand.Contested: text = "contested (2/3)"; break;
+            case Factions.Wire.WireDefenceBand.Fortress: text = "fortress (3/3)"; break;
+            default: return null;
+        }
+        return ageSeconds > 0 ? text + ", " + Age(ageSeconds) : text;
+    }
+
+    /// <summary>"just now", "12 min ago", "5 h ago", "3 d ago".</summary>
+    public static string Age(int seconds)
+    {
+        if (seconds < 60) return "just now";
+        if (seconds < 3600) return (seconds / 60) + " min ago";
+        if (seconds < 86400) return (seconds / 3600) + " h ago";
+        return (seconds / 86400) + " d ago";
+    }
+
+    /// <summary>The map label for a station the viewer has not identified: how developed it looks,
+    /// which is all a sensor below Identity has learned. Null for a stage that names nothing.</summary>
+    public static string StageWord(byte stage)
+    {
+        switch ((Factions.Wire.WireNodeStage)stage)
+        {
+            case Factions.Wire.WireNodeStage.Outpost: return "Outpost";
+            case Factions.Wire.WireNodeStage.Settlement: return "Settlement";
+            case Factions.Wire.WireNodeStage.Hub: return "Hub";
+            case Factions.Wire.WireNodeStage.Capital: return "Capital";
+            default: return null;
+        }
+    }
+
     /// <summary>Bits in the map's capability mask, matching <c>NodeCapabilityKind</c>'s ordinals.
     /// Assets and node detail carry the named list instead and never need these.</summary>
     [Flags]

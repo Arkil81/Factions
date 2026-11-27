@@ -158,6 +158,32 @@ namespace Factions.Core
     }
 
     /// <summary>
+    /// What a faction's members hold in their own wallets, outside the faction's treasury. The
+    /// central bank counts it against a player faction's grant: members who can fund their own
+    /// faction make it no investment target, and a member's withdrawal lands here rather than
+    /// disappearing from the bank's view. Host-side because membership and personal balances are SE
+    /// state; Core never asks for an NPC faction.
+    /// </summary>
+    public interface IMemberWealth
+    {
+        /// <summary>The sum of the members' personal balances, 0 when the faction cannot be resolved.
+        /// Never negative.</summary>
+        long MemberWealth(FactionState faction);
+    }
+
+    /// <summary>No members with wallets: the offline sim and any host without a live SE economy.
+    /// The default for <see cref="WorldModel.MemberWealth"/>.</summary>
+    public static class NullMemberWealth
+    {
+        public static readonly IMemberWealth Instance = new NullImpl();
+
+        private sealed class NullImpl : IMemberWealth
+        {
+            public long MemberWealth(FactionState faction) { return 0; }
+        }
+    }
+
+    /// <summary>
     /// Fleet materialisation hook. When MES is available the host wires a real adapter that calls
     /// CustomSpawnRequest; otherwise the NullFleetSpawner no-ops (dry-run / abstract simulation).
     /// GridExists is always wired on the host so reboot reconciliation can clean up dead entity IDs.

@@ -107,6 +107,18 @@ attacks on your nodes, and the map shows *Under attack* and *Under siege* on the
 - place a **Defend** campaign on the node,
 - keep your fleet doctrine stocked with combat ships.
 
+## Attacking other players
+
+Attacking another player's grids while nobody in their faction is online is against the server
+rules. If you damage a grid whose owner's whole faction has been offline for more than 15 minutes,
+a red warning tells you so, and the attack is logged for the admins. Grinding counts. With the
+client plugin, the scanner marks such a grid *owner offline* before you attack it.
+
+Grids owned by an NPC are not covered, including the NPC members of a player faction: those can be
+attacked at any time.
+
+Logging off during a fight to protect your grids is also logged.
+
 ## In a fight
 
 - After a fight near you, a message tells you the result: who attacked whom, whether the attack was

@@ -31,6 +31,36 @@ namespace Factions.Core
         public double H;        // hold strength at last detection
         public double V;        // resource value at last detection
         public bool HasDetail;  // not serialised: it is the shape, not a field
+        public byte G;          // remembered intel tier (IntelTier); omitted while 0
+        public byte S;          // stage at that reading (NodeStage); omitted while 0
+        public DateTime GT;     // when G was read; omitted with G
+        public byte D;          // defence band (DefenceBand) at the last Armament reading; omitted while 0
+        public DateTime DT;     // when D was read; omitted with D
+        public float DV;        // the scanned defence DPS behind D, server-side only; omitted with D
+
+        public static KnowledgeEntryDoc From(KnownNode n)
+        {
+            return new KnowledgeEntryDoc
+            {
+                T = n.LastSeenUtc, HasDetail = n.HasDetail, O = n.OwnerTag, H = n.HoldStrength,
+                V = n.ResourceValue, G = (byte)n.Tier, S = (byte)n.Stage, GT = n.GradedUtc,
+                D = (byte)n.Defence, DT = n.DefenceUtc, DV = n.DefenceDps,
+            };
+        }
+
+        public KnownNode ToKnownNode()
+        {
+            return new KnownNode
+            {
+                LastSeenUtc = T, HasDetail = HasDetail, OwnerTag = O, HoldStrength = H, ResourceValue = V,
+                Tier = HasDetail ? (IntelTier)G : IntelTier.None,
+                Stage = HasDetail && G != 0 ? (NodeStage)S : NodeStage.None,
+                GradedUtc = HasDetail && G != 0 ? GT : default(DateTime),
+                Defence = HasDetail ? (DefenceBand)D : DefenceBand.Unknown,
+                DefenceUtc = HasDetail && D != 0 ? DT : default(DateTime),
+                DefenceDps = HasDetail && D != 0 ? DV : 0f,
+            };
+        }
     }
 
     /// <summary>Reads a discovered-set entry written either as a bare timestamp (pre-snapshot, and
@@ -50,6 +80,18 @@ namespace Factions.Core
             if (!string.IsNullOrEmpty(e.O)) { w.WritePropertyName("O"); w.WriteValue(e.O); }
             w.WritePropertyName("H"); w.WriteValue(e.H);
             w.WritePropertyName("V"); w.WriteValue(e.V);
+            if (e.G != 0)
+            {
+                w.WritePropertyName("G"); w.WriteValue(e.G);
+                if (e.S != 0) { w.WritePropertyName("S"); w.WriteValue(e.S); }
+                w.WritePropertyName("GT"); w.WriteValue(e.GT);
+            }
+            if (e.D != 0)
+            {
+                w.WritePropertyName("D"); w.WriteValue(e.D);
+                w.WritePropertyName("DT"); w.WriteValue(e.DT);
+                if (e.DV > 0) { w.WritePropertyName("DV"); w.WriteValue(e.DV); }
+            }
             w.WriteEndObject();
         }
 
@@ -80,6 +122,21 @@ namespace Factions.Core
             if (owner != null) entry.O = owner.Type == JTokenType.Null ? null : owner.ToObject<string>();
             if (hold != null) entry.H = hold.ToObject<double>();
             if (value != null) entry.V = value.ToObject<double>();
+            JToken grade = o["G"], stage = o["S"], graded = o["GT"];
+            if (grade != null && graded != null)
+            {
+                entry.G = grade.ToObject<byte>();
+                if (stage != null) entry.S = stage.ToObject<byte>();
+                entry.GT = ToUtc(graded.ToObject<DateTime>());
+            }
+            JToken defence = o["D"], defenceAt = o["DT"];
+            if (defence != null && defenceAt != null)
+            {
+                entry.D = defence.ToObject<byte>();
+                entry.DT = ToUtc(defenceAt.ToObject<DateTime>());
+                JToken dps = o["DV"];
+                if (dps != null) entry.DV = dps.ToObject<float>();
+            }
             return entry;
         }
 
@@ -2194,14 +2251,7 @@ namespace Factions.Core
             {
                 knowledge = new Dictionary<string, KnowledgeEntryDoc>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, KnownNode> kv in s.Knowledge.Snapshots)
-                    knowledge[kv.Key] = new KnowledgeEntryDoc
-                    {
-                        T = kv.Value.LastSeenUtc,
-                        HasDetail = kv.Value.HasDetail,
-                        O = kv.Value.OwnerTag,
-                        H = kv.Value.HoldStrength,
-                        V = kv.Value.ResourceValue,
-                    };
+                    knowledge[kv.Key] = KnowledgeEntryDoc.From(kv.Value);
             }
 
             List<string> reservationOptIn = null;
@@ -3147,14 +3197,7 @@ namespace Factions.Core
                 foreach (KeyValuePair<string, KnowledgeEntryDoc> kv in d.Knowledge)
                 {
                     if (kv.Value == null) continue;
-                    loaded[kv.Key] = new KnownNode
-                    {
-                        LastSeenUtc = kv.Value.T,
-                        HasDetail = kv.Value.HasDetail,
-                        OwnerTag = kv.Value.O,
-                        HoldStrength = kv.Value.H,
-                        ResourceValue = kv.Value.V,
-                    };
+                    loaded[kv.Key] = kv.Value.ToKnownNode();
                 }
                 s.Knowledge.LoadFrom(loaded);
             }

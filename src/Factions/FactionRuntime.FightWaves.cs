@@ -167,6 +167,29 @@ namespace Factions
             PruneWaveSlots();
         }
 
+        /// <summary>Bridge and chat verb <c>factions defence [tag]</c>: what every faction-held
+        /// station would meet an attack with, by the offensive gate's own arithmetic.</summary>
+        internal string DescribeNodeDefence(string tag)
+        {
+            return NodeDefenceCensus.Describe(
+                NodeDefenceCensus.Take(_world.Graph, _states, _world.PrefabCatalogue, _tuning), tag);
+        }
+
+        /// <summary>Bridge and chat verb <c>factions factionintel</c>: every faction's true figures
+        /// behind the Factions page Overview's word bands.</summary>
+        internal string DescribeFactionIntel()
+        {
+            return FactionIntelCensus.Describe(FactionIntelRows());
+        }
+
+        /// <summary>Every faction's true figures; the Factions page's exact answer for its own members
+        /// and admins.</summary>
+        internal List<FactionIntelCensus.Row> FactionIntelRows()
+        {
+            return FactionIntelCensus.Take(
+                _world.Graph, _states, _world.PrefabCatalogue, _tuning, _world.GetLedger, _world.GetFleetCombatPower);
+        }
+
         /// <summary>Bridge and chat verb <c>factions fight</c>: every live site, each side's field and
         /// queue, the hulls leaving and the spawns in flight.</summary>
         internal string DescribeFightSites()

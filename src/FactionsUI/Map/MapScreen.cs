@@ -601,12 +601,27 @@ internal sealed class MapScreen : MyGuiScreenBase
         {
             MapWorld.MapNode node = component.World.Nodes[i];
             if (node.Id != _selectedId) continue;
-            var lines = new List<string>(SelectionLineCount)
+            var lines = new List<string>(SelectionLineCount);
+            if (!node.Classed)
             {
-                node.DisplayName + "  [" + NodeLabels.Describe(
-                    node.DominantOre, node.Surveyed, node.CapabilityMask, node.HasStation) + "]",
-                "Owner: " + (node.OwnerTag ?? "unclaimed") + "  (" + RelationName(node.Relation) + ")",
-            };
+                lines.Add("Unidentified contact");
+            }
+            else if (!node.Identified)
+            {
+                // No name and no capabilities below Identity: the stage and the ground are all a
+                // sensor has resolved.
+                string stage = NodeLabels.StageWord(node.Stage) ?? "Site";
+                lines.Add(stage + "  [" + NodeLabels.Describe(node.DominantOre, node.Surveyed, 0, node.HasStation) + "]");
+                lines.Add("Owner: not identified");
+            }
+            else
+            {
+                lines.Add(node.DisplayName + "  [" + NodeLabels.Describe(
+                    node.DominantOre, node.Surveyed, node.CapabilityMask, node.HasStation) + "]");
+                lines.Add("Owner: " + (node.OwnerTag ?? "unclaimed") + "  (" + RelationName(node.Relation) + ")");
+            }
+            string defence = NodeLabels.Defence(node.Defence, 0);
+            if (defence != null) lines.Add("Defence: " + defence);
             AppendEventLines(component, node, lines);
             lines.Add("Range: " + FormatDistance(
                 Vector3D.Distance(node.PositionM, MapComponent.LocalPlayerPosition())));
@@ -617,23 +632,7 @@ internal sealed class MapScreen : MyGuiScreenBase
         {
             MapWorld.MapFleet fleet = component.World.Fleets[i];
             if (fleet.Key != _selectedId) continue;
-            TimeSpan remaining = fleet.EtaUtc - DateTime.UtcNow;
-            // A dwelling fleet's ETA is the moment its strike RESOLVES, not an arrival: it is
-            // already there. Labelling it "arrives in" describes a commute and hides the one window
-            // in which the fight can still be answered.
-            string leg;
-            if (fleet.IsEngaging)
-                leg = "Fighting here: resolves in " + FormatRemaining(remaining);
-            else if (fleet.IsHoldingDefence)
-                leg = "Holding station: relieves in " + FormatRemaining(remaining);
-            else
-                leg = "Arrives in: " + FormatRemaining(remaining);
-            return new[]
-            {
-                "Convoy  x" + fleet.ConvoySize,
-                "Owner: " + (fleet.OwnerTag ?? "unknown") + "  (" + RelationName(fleet.Relation) + ")",
-                leg,
-            };
+            return DescribeFleet(fleet);
         }
 
         // The selection outlived the snapshot it came from.
@@ -804,33 +803,38 @@ internal sealed class MapScreen : MyGuiScreenBase
         {
             MapWorld.MapFleet fleet = component.World.Fleets[i];
             if (!fleet.IsEngaging && !fleet.IsHoldingDefence) continue;
-            if (Vector3D.DistanceSquared(fleet.TargetM, node.PositionM) > NodeMatchMetresSq) continue;
+            // A dwell holds at its target, so its position is the node it is at whether or not
+            // the destination was offered.
+            Vector3D at = fleet.HasFlightPlan ? fleet.TargetM : fleet.WorldPosition();
+            if (Vector3D.DistanceSquared(at, node.PositionM) > NodeMatchMetresSq) continue;
 
             if (fleet.IsEngaging)
             {
                 attackers++;
                 attackerHulls += fleet.ConvoySize;
                 if (attackerTag == null) attackerTag = fleet.OwnerTag;
-                if (fleet.EtaUtc < attackEnd) attackEnd = fleet.EtaUtc;
+                if (fleet.HasFlightPlan && fleet.EtaUtc < attackEnd) attackEnd = fleet.EtaUtc;
             }
             else
             {
                 defenders++;
                 defenderHulls += fleet.ConvoySize;
                 if (defenderTag == null) defenderTag = fleet.OwnerTag;
-                if (fleet.EtaUtc < defenceEnd) defenceEnd = fleet.EtaUtc;
+                if (fleet.HasFlightPlan && fleet.EtaUtc < defenceEnd) defenceEnd = fleet.EtaUtc;
             }
         }
 
         if (attackers > 0)
         {
             lines.Add("! Under attack: " + Attribution(attackerTag, attackers) + " x" + attackerHulls
-                      + ", resolves in " + FormatRemaining(attackEnd - DateTime.UtcNow));
+                      + (attackEnd != DateTime.MaxValue
+                          ? ", resolves in " + FormatRemaining(attackEnd - DateTime.UtcNow) : ""));
         }
         if (defenders > 0)
         {
             lines.Add("Defended: " + Attribution(defenderTag, defenders) + " x" + defenderHulls
-                      + ", relieves in " + FormatRemaining(defenceEnd - DateTime.UtcNow));
+                      + (defenceEnd != DateTime.MaxValue
+                          ? ", relieves in " + FormatRemaining(defenceEnd - DateTime.UtcNow) : ""));
         }
 
         string recent = RecentEventAt(node.Id);
@@ -887,6 +891,48 @@ internal sealed class MapScreen : MyGuiScreenBase
     }
 
     /// <summary>Who is doing it, when several factions are at one node.</summary>
+    /// <summary>
+    /// A fleet's panel, saying only what the viewer has learned (docs/fog-of-war.md → Intelligence
+    /// grades). The server has already zeroed what lies above the tier, so each line is gated on the
+    /// tier rather than on a zero, which would read a legacy one-hull convoy as unknown.
+    /// </summary>
+    private static string[] DescribeFleet(MapWorld.MapFleet fleet)
+    {
+        if (fleet.IsGrid) return DescribeGrid(fleet);
+        var lines = new List<string>(3);
+        bool classed = fleet.Tier >= (byte)WireIntelTier.Class;
+        bool identified = fleet.Tier >= (byte)WireIntelTier.Identity;
+
+        lines.Add(classed ? "Convoy  x" + Math.Max(1, fleet.ConvoySize) : "Unidentified contact");
+        lines.Add(identified
+            ? "Owner: " + (fleet.OwnerTag ?? "unknown") + "  (" + RelationName(fleet.Relation) + ")"
+            : "Owner: not identified");
+
+        // A dwelling fleet's ETA is the moment its strike RESOLVES, not an arrival: it is
+        // already there. Labelling it "arrives in" describes a commute and hides the one window
+        // in which the fight can still be answered.
+        TimeSpan remaining = fleet.EtaUtc - DateTime.UtcNow;
+        if (fleet.IsEngaging)
+            lines.Add(fleet.HasFlightPlan ? "Fighting here: resolves in " + FormatRemaining(remaining) : "Fighting here");
+        else if (fleet.IsHoldingDefence)
+            lines.Add(fleet.HasFlightPlan ? "Holding station: relieves in " + FormatRemaining(remaining) : "Holding station");
+        else if (fleet.HasFlightPlan)
+            lines.Add("Arrives in: " + FormatRemaining(remaining));
+        return lines.ToArray();
+    }
+
+    /// <summary>A grid's panel: the server's label for the viewer's tier, the grid's name once
+    /// identified, and its range.</summary>
+    private static string[] DescribeGrid(MapWorld.MapFleet fleet)
+    {
+        var lines = new List<string>(3);
+        lines.Add(fleet.Name ?? (fleet.Tier >= (byte)WireIntelTier.Class ? "Grid" : "Unidentified contact"));
+        if (!string.IsNullOrEmpty(fleet.Label)) lines.Add(fleet.Label);
+        lines.Add("Range: " + FormatDistance(
+            Vector3D.Distance(fleet.WorldPosition(), MapComponent.LocalPlayerPosition())));
+        return lines.ToArray();
+    }
+
     private static string Attribution(string tag, int fleets)
     {
         string who = string.IsNullOrEmpty(tag) ? "unknown" : tag;

@@ -41,6 +41,11 @@ namespace Factions
         /// per viewer per tick rather than per fleet. An estate can be hundreds of nodes and every
         /// fleet would otherwise walk it again.</summary>
         private readonly List<SensorSource> _viewerSensors = new List<SensorSource>();
+        /// <summary>The tier each subscriber held for each fleet at the last send, for hysteresis.
+        /// Rebuilt every send from the fleets actually sent, so a fleet that left the picture is
+        /// forgotten with it.</summary>
+        private readonly Dictionary<ulong, Dictionary<string, IntelTier>> _fleetTiers =
+            new Dictionary<ulong, Dictionary<string, IntelTier>>();
         /// <summary>Nodes under attack or unprotected this tick, collected once for every viewer
         /// rather than per subscriber: the graph walk is the expensive half and the answer does not
         /// depend on who is looking. Normally empty, which is what makes the whole feature free
@@ -49,6 +54,9 @@ namespace Factions
         /// <summary>The alarm rows for the viewer currently being served.</summary>
         private readonly List<WireMapAlarm> _alarms = new List<WireMapAlarm>();
         private int _tick;
+
+        /// <summary>Grids the sim does not own, refreshed by the plugin before this tick (FAC-533).</summary>
+        internal Func<List<ScannerGridCandidate>> Grids;
 
         public PlayerMapManager(FactionRuntime runtime, UplinkManager uplink, PlayerScannerManager scanner)
         {
@@ -79,6 +87,7 @@ namespace Factions
             {
                 _streaming.Remove(steamId);
                 _owesWorld.Remove(steamId);
+                _fleetTiers.Remove(steamId);
                 if (UplinkManager.DebugTraffic) _uplink.WriteTraffic("MAP_UNSUBSCRIBE steam=" + steamId);
             }
         }
@@ -186,6 +195,9 @@ namespace Factions
             TimeSpan horizon = _runtime.World.Tuning.DiscoveryHorizon;
             double birthrightRange = _runtime.World.Tuning.BirthrightRangeKm;
             string viewerFactionTag = ResolveViewerFactionTag(viewerIdentityId);
+            NodeStages stages = _runtime.NodeStages;
+            var tiers = new int[(int)IntelTier.Full + 1];
+            int defenceKnown = 0;
 
             foreach (SpatialNode node in _runtime.World.Graph.Nodes.Values)
             {
@@ -201,27 +213,37 @@ namespace Factions
                 if (!belief.IsLive) remembered++;
                 string ownerTag = belief.OwnerTag;
                 bool claimable = NeutralFaction.IsClaimable(ownerTag);
+                NodeStage stage;
+                DefenceBand defence;
+                IntelTier tier = GradeNode(viewerFactionTag, node, knowledge, stages, nowUtc, horizon, out stage, out defence);
+                if (defence != DefenceBand.Unknown) defenceKnown++;
+                tiers[(int)tier]++;
+                bool identified = IntelGrade.ShowsIdentity(tier);
+                bool classed = IntelGrade.ShowsClass(tier);
                 nodes.Add(new WireMapNode
                 {
                     Id = node.Id,
-                    DisplayName = node.DisplayName,
-                    DominantOre = NodeDisplay.DominantOre(node),
-                    Surveyed = NodeDisplay.Surveyed(node),
-                    CapabilityMask = NodeDisplay.CapabilityMask(node),
-                    Zone = (byte)node.Zone,
-                    OwnerTag = claimable ? null : ownerTag,
-                    Relation = (byte)_relations.For(ownerTag, viewerIdentityId, claimable),
-                    HasStation = node.StableStationId != 0,
-                    HasInfrastructure = node.StableStationId != 0 && HasAnyCapability(node),
+                    Tier = (byte)tier,
+                    Stage = (byte)stage,
+                    Defence = (byte)defence,
+                    DisplayName = identified ? node.DisplayName : null,
+                    DominantOre = classed ? NodeDisplay.DominantOre(node) : null,
+                    Surveyed = classed && NodeDisplay.Surveyed(node),
+                    CapabilityMask = identified ? NodeDisplay.CapabilityMask(node) : (ushort)0,
+                    Zone = classed ? (byte)node.Zone : (byte)0,
+                    OwnerTag = identified && !claimable ? ownerTag : null,
+                    Relation = (byte)(identified ? _relations.For(ownerTag, viewerIdentityId, claimable) : WireRelation.Unknown),
+                    HasStation = classed && node.StableStationId != 0,
+                    HasInfrastructure = classed && node.StableStationId != 0 && HasAnyCapability(node),
                     XKm = node.Position.X,
                     YKm = node.Position.Y,
                     ZKm = node.Position.Z,
                     RadiusKm = node.Radius,
-                    HoldStrength = belief.HoldStrength,
+                    HoldStrength = identified ? belief.HoldStrength : 0,
                     Knowledge = (byte)knowledge,
                 });
 
-                if (!claimable && !string.IsNullOrEmpty(ownerTag))
+                if (identified && !claimable && !string.IsNullOrEmpty(ownerTag))
                 {
                     int count;
                     nodeCounts.TryGetValue(ownerTag, out count);
@@ -248,7 +270,14 @@ namespace Factions
                 // the graph past the memory again.
                 _uplink.WriteTraffic("MAP_WORLD steam=" + steamId
                                      + " nodes=" + nodes.Count + " factions=" + factions.Count
-                                     + " remembered=" + remembered);
+                                     + " remembered=" + remembered
+                                     + " contact=" + tiers[(int)IntelTier.Contact]
+                                     + " class=" + tiers[(int)IntelTier.Class]
+                                     + " identity=" + tiers[(int)IntelTier.Identity]
+                                     + " armament=" + tiers[(int)IntelTier.Armament]
+                                     + " full=" + tiers[(int)IntelTier.Full]
+                                     + " capitals=" + stages.CapitalCount
+                                     + " defence=" + defenceKnown);
             }
         }
 
@@ -256,49 +285,53 @@ namespace Factions
         {
             string viewerFactionTag = ResolveViewerFactionTag(viewerIdentityId);
             BuildViewerSensors(viewerIdentityId, viewerFactionTag);
+            FactionTuning tuning = _runtime.World.Tuning;
+            Dictionary<string, IntelTier> held;
+            _fleetTiers.TryGetValue(steamId, out held);
+            var next = new Dictionary<string, IntelTier>(StringComparer.Ordinal);
             var wire = new List<WireMapFleet>(fleets.Count);
             foreach (MapFleetInfo fleet in fleets)
             {
-                if (!IsVisibleTo(viewerFactionTag, fleet)) continue;
+                IntelTier tier;
+                if (!TryGrade(viewerFactionTag, fleet, held, tuning, out tier)) continue;
+                if (!string.IsNullOrEmpty(fleet.Key)) next[fleet.Key] = tier;
+                if (tier == IntelTier.Armament && _scanner != null)
+                    _scanner.RecordSighting(viewerIdentityId, fleet.OwnerTag, fleet.WeaponDps);
 
-                WireMapStop[] stops = null;
-                if (fleet.RoutedStops != null && fleet.RoutedStops.Count > 0)
-                {
-                    stops = new WireMapStop[fleet.RoutedStops.Count];
-                    for (int i = 0; i < fleet.RoutedStops.Count; i++)
-                    {
-                        MapFleetStopInfo stop = fleet.RoutedStops[i];
-                        stops[i] = new WireMapStop
-                        {
-                            XKm = stop.PositionKm.X,
-                            YKm = stop.PositionKm.Y,
-                            ZKm = stop.PositionKm.Z,
-                            Kind = (byte)stop.Kind,
-                        };
-                    }
-                }
+                WireRelation relation = _relations.For(fleet.OwnerTag, viewerIdentityId);
+                bool identified = IntelGrade.ShowsIdentity(tier);
+                bool classed = IntelGrade.ShowsClass(tier);
+                bool plan = tier == IntelTier.Full || PlayerScannerManager.OffersFlightPlan(relation);
 
-                wire.Add(new WireMapFleet
+                var w = new WireMapFleet
                 {
                     Key = fleet.Key,
-                    Kind = (byte)fleet.Kind,
-                    OwnerTag = fleet.OwnerTag,
-                    Relation = (byte)_relations.For(fleet.OwnerTag, viewerIdentityId),
+                    Tier = (byte)tier,
+                    Kind = classed ? (byte)fleet.Kind : (byte)0,
+                    OwnerTag = identified ? fleet.OwnerTag : null,
+                    Relation = (byte)(identified ? relation : WireRelation.Unknown),
                     XKm = fleet.PositionKm.X,
                     YKm = fleet.PositionKm.Y,
                     ZKm = fleet.PositionKm.Z,
                     VelXKmPerMin = fleet.VelocityKmPerMin.X,
                     VelYKmPerMin = fleet.VelocityKmPerMin.Y,
                     VelZKmPerMin = fleet.VelocityKmPerMin.Z,
-                    TargetXKm = fleet.TargetPosKm.X,
-                    TargetYKm = fleet.TargetPosKm.Y,
-                    TargetZKm = fleet.TargetPosKm.Z,
-                    EtaUtcTicks = fleet.EstimatedArrivalUtc.Ticks,
-                    ConvoySize = fleet.ConvoySize,
+                    ConvoySize = classed ? fleet.ConvoySize : 0,
                     EntityId = fleet.MaterialisedEntityId,
-                    RoutedStops = stops,
-                });
+                    HasFlightPlan = plan,
+                };
+                if (plan)
+                {
+                    w.TargetXKm = fleet.TargetPosKm.X;
+                    w.TargetYKm = fleet.TargetPosKm.Y;
+                    w.TargetZKm = fleet.TargetPosKm.Z;
+                    w.EtaUtcTicks = fleet.EstimatedArrivalUtc.Ticks;
+                    w.RoutedStops = StopsOf(fleet);
+                }
+                wire.Add(w);
             }
+            AppendGrids(wire, next, held, viewerIdentityId, viewerFactionTag, tuning);
+            _fleetTiers[steamId] = next;
 
             BuildAlarmsFor(viewerFactionTag);
             _uplink.Send(steamId, FactionsWire.WriteMapFleets(wire, _alarms));
@@ -348,6 +381,49 @@ namespace Factions
             return true;
         }
 
+        /// <summary>
+        /// The viewer's grade for a node they know, and the stage they saw (docs/fog-of-war.md →
+        /// Remembered grades). The best tier across their stores; their own estate is Full. The
+        /// stage is the live one while a sensor has the node and the remembered one otherwise,
+        /// falling back to live for an entry graded before stages were recorded. Shared with the
+        /// node window so the marker and the window cannot disagree.
+        ///
+        /// <para>The defence band is the freshest remembered one, with its reading time, and live for
+        /// the viewer's own estate (read through <paramref name="defenceOf"/>).</para>
+        /// </summary>
+        internal static IntelTier GradeNode(
+            string viewerFactionTag, IList<FactionKnowledge> sources, SpatialNode node, bool detected,
+            NodeStages stages, DateTime nowUtc, TimeSpan horizon, out NodeStage stage,
+            Func<SpatialNode, DefenceReading> defenceOf, out DefenceBand defence, out DateTime defenceUtc)
+        {
+            KnownNode grade = KnowledgeView.GradeOf(viewerFactionTag, sources, node, nowUtc, horizon);
+            stage = NodeStage.None;
+            if (grade.Tier == IntelTier.Full && defenceOf != null)
+            {
+                defence = defenceOf(node).Band;
+                defenceUtc = nowUtc;
+            }
+            else
+            {
+                defence = grade.Defence;
+                defenceUtc = grade.DefenceUtc;
+            }
+            if (!IntelGrade.ShowsClass(grade.Tier)) return grade.Tier;
+            stage = detected || grade.Stage == NodeStage.None
+                ? (stages != null ? stages.Of(node) : NodeStage.None)
+                : grade.Stage;
+            return grade.Tier;
+        }
+
+        private IntelTier GradeNode(string viewerFactionTag, SpatialNode node, WireKnowledge knowledge,
+                                    NodeStages stages, DateTime nowUtc, TimeSpan horizon, out NodeStage stage,
+                                    out DefenceBand defence)
+        {
+            DateTime defenceUtc;
+            return GradeNode(viewerFactionTag, _viewerSources, node, knowledge == WireKnowledge.Detected,
+                             stages, nowUtc, horizon, out stage, _runtime.NodeDefence, out defence, out defenceUtc);
+        }
+
         private void BuildViewerSources(long viewerIdentityId)
         {
             ViewerKnowledge.BuildSources(_runtime, _scanner, viewerIdentityId, _viewerSources);
@@ -370,12 +446,105 @@ namespace Factions
         /// <para><b>Your own faction's convoys are always visible.</b> Ownership implies knowledge
         /// here for the same reason it does for nodes -- a faction that cannot see its own fleets
         /// would be told it had lost them every time they flew out of its own sensor envelope.</para>
+        ///
+        /// <para>A visible fleet is also graded: the best margin across the viewer's sensors, with
+        /// hysteresis against <paramref name="held"/> and the same transponder rule as the HUD
+        /// (<see cref="IntelGrade.Of"/>). Own convoys are <see cref="IntelTier.Full"/>.</para>
         /// </summary>
-        private bool IsVisibleTo(string viewerFactionTag, MapFleetInfo fleet)
+        private bool TryGrade(string viewerFactionTag, MapFleetInfo fleet,
+                              Dictionary<string, IntelTier> held, FactionTuning tuning, out IntelTier tier)
         {
-            if (!string.IsNullOrEmpty(viewerFactionTag) && fleet.OwnerTag == viewerFactionTag) return true;
-            return FleetSensing.IsDetectedBy(_viewerSensors, fleet.PositionKm, fleet.Signature,
-                                             fleet.BroadcastRadiusKm, _runtime.SensorOcclusion);
+            bool own = !string.IsNullOrEmpty(viewerFactionTag) && fleet.OwnerTag == viewerFactionTag;
+            SensorReading reading = own
+                ? new SensorReading { Detected = true, SensorSees = true, MarginDb = IntelGrade.MaxMarginDb }
+                : FleetSensing.Measure(_viewerSensors, fleet.PositionKm, fleet.Signature,
+                                       fleet.BroadcastRadiusKm, _runtime.SensorOcclusion);
+            IntelTier previous = IntelTier.None;
+            if (held != null && !string.IsNullOrEmpty(fleet.Key)) held.TryGetValue(fleet.Key, out previous);
+            bool transponder = IntelGrade.IsCivilianMission(fleet.Kind)
+                || fleet.BroadcastRadiusKm > 0
+                || StrikesViewer(fleet.EngagementTargetNodeId, viewerFactionTag);
+            tier = IntelGrade.Of(reading, previous, own, transponder, tuning);
+            return tier != IntelTier.None;
+        }
+
+        /// <summary>The grids this viewer's sensors find, after the fleets, by the scanner's rule and
+        /// the scanner's label: one grid reads the same on the HUD and on the map. The grid being
+        /// flown is left out, as on the HUD.</summary>
+        private void AppendGrids(List<WireMapFleet> wire, Dictionary<string, IntelTier> next,
+                                 Dictionary<string, IntelTier> held, long viewerIdentityId,
+                                 string viewerFactionTag, FactionTuning tuning)
+        {
+            List<ScannerGridCandidate> grids = Grids != null ? Grids() : null;
+            if (grids == null || grids.Count == 0) return;
+            long flying = _scanner != null ? _scanner.ActiveGridLeadOf(viewerIdentityId) : 0;
+            for (int i = 0; i < grids.Count; i++)
+            {
+                ScannerGridCandidate g = grids[i];
+                if (g.EntityId == 0 || g.EntityId == flying) continue;
+                bool own = g.OwnerIdentityId == viewerIdentityId
+                           || (!string.IsNullOrEmpty(viewerFactionTag) && g.OwnerTag == viewerFactionTag);
+                SensorReading reading = own
+                    ? new SensorReading { Detected = true, SensorSees = true, MarginDb = IntelGrade.MaxMarginDb }
+                    : FleetSensing.Measure(_viewerSensors, g.PositionKm, g.Signature > 0 ? g.Signature : 1.0,
+                                           g.BroadcastRadiusKm, _runtime.SensorOcclusion);
+                string key = ScannerGrids.KeyOf(g.EntityId);
+                IntelTier previous = IntelTier.None;
+                if (held != null) held.TryGetValue(key, out previous);
+                IntelTier tier = IntelGrade.Of(reading, previous, own, g.BroadcastRadiusKm > 0, tuning);
+                if (tier == IntelTier.None) continue;
+                next[key] = tier;
+                if (tier == IntelTier.Armament && _scanner != null && !string.IsNullOrEmpty(g.OwnerTag))
+                    _scanner.RecordSighting(viewerIdentityId, g.OwnerTag, g.WeaponDps);
+
+                ScannerContact c = ScannerGrids.ToContact(g, reading);
+                c.Tier = tier;
+                ScannerGrids.Withhold(ref c, tuning);
+                wire.Add(new WireMapFleet
+                {
+                    Key = key,
+                    Tier = (byte)tier,
+                    OwnerTag = c.OwnerTag,
+                    Relation = (byte)PlayerScannerManager.GridRelation(_relations, c.OwnerTag, c.OwnerIdentityId,
+                                                                       viewerIdentityId),
+                    XKm = g.PositionKm.X,
+                    YKm = g.PositionKm.Y,
+                    ZKm = g.PositionKm.Z,
+                    VelXKmPerMin = c.VelocityKmPerMin.X,
+                    VelYKmPerMin = c.VelocityKmPerMin.Y,
+                    VelZKmPerMin = c.VelocityKmPerMin.Z,
+                    EntityId = g.EntityId,
+                    IsGrid = true,
+                    Label = c.Label,
+                    Name = c.DisplayName,
+                });
+            }
+        }
+
+        private bool StrikesViewer(string nodeId, string viewerFactionTag)
+        {
+            if (string.IsNullOrEmpty(nodeId) || string.IsNullOrEmpty(viewerFactionTag)) return false;
+            SpatialNode node;
+            return _runtime.World.Graph.Nodes.TryGetValue(nodeId, out node) && node != null
+                && node.OwnerFactionTag == viewerFactionTag;
+        }
+
+        private static WireMapStop[] StopsOf(MapFleetInfo fleet)
+        {
+            if (fleet.RoutedStops == null || fleet.RoutedStops.Count == 0) return null;
+            var stops = new WireMapStop[fleet.RoutedStops.Count];
+            for (int i = 0; i < fleet.RoutedStops.Count; i++)
+            {
+                MapFleetStopInfo stop = fleet.RoutedStops[i];
+                stops[i] = new WireMapStop
+                {
+                    XKm = stop.PositionKm.X,
+                    YKm = stop.PositionKm.Y,
+                    ZKm = stop.PositionKm.Z,
+                    Kind = (byte)stop.Kind,
+                };
+            }
+            return stops;
         }
 
         /// <summary>Everything this viewer sees through: the grid they are flying (the shipped
@@ -421,6 +590,7 @@ namespace Factions
             {
                 _streaming.Remove(steamId);
                 _owesWorld.Remove(steamId);
+                _fleetTiers.Remove(steamId);
             }
         }
 
@@ -428,6 +598,7 @@ namespace Factions
         {
             _streaming.Clear();
             _owesWorld.Clear();
+            _fleetTiers.Clear();
             _relations.Clear();
         }
     }

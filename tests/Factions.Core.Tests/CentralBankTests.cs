@@ -719,6 +719,181 @@ namespace Factions.Core.Tests
             Assert.Contains(world.SnapshotCentralBankEvents(), e => e.Type == "grant-denied" && e.FactionTag == "F" && e.Message.Contains("cooldown"));
         }
 
+        /// <summary>FAC-527. A member who empties the faction wallet before every pass holds what they
+        /// withdrew, and the bank counts it as the faction's liquidity: the drained faction is granted
+        /// exactly what the same faction left alone is, and its members end up holding the buffer.</summary>
+        [Fact]
+        public void AccrueIncome_PlayerFactionGrant_CountsWhatMembersWithdrew()
+        {
+            const int passes = 20;   // one hour at the shipped GlobalPassIntervalSeconds of 180
+
+            long withdrawn;
+            long drainedGrants = RunOneNodePlayerFaction(passes, true, 1.0, true, out withdrawn);
+            long controlWithdrawn;
+            long controlGrants = RunOneNodePlayerFaction(passes, false, 1.0, true, out controlWithdrawn);
+
+            // Control: filled to the 75k buffer once, then only the upkeep replaced:
+            // 4 x 17,000 + 14,500 + 15 x 1,500.
+            Assert.Equal(0, controlWithdrawn);
+            Assert.Equal(105000, controlGrants);
+            // Drained: the same total, and the members stop being refilled at the buffer.
+            Assert.Equal(controlGrants, drainedGrants);
+            Assert.Equal(75000, withdrawn);
+        }
+
+        /// <summary>The knob at 0 ignores member wallets, and the per-event cap is paid on every pass to
+        /// a faction drained before each one: 17,000 = 2 % of 850k collateral. That is the loop the
+        /// fraction closes, so it is also the proof the fraction is what closed it.</summary>
+        [Fact]
+        public void AccrueIncome_PlayerFactionGrant_MemberWealthFractionZero_IgnoresMemberWallets()
+        {
+            long withdrawn;
+            long granted = RunOneNodePlayerFaction(20, true, 0.0, true, out withdrawn);
+
+            Assert.Equal(20 * 17000L, granted);
+            Assert.Equal(20 * 15500L, withdrawn);
+        }
+
+        /// <summary>An NPC faction's members are crew and agents, not investors: their wallets never
+        /// reduce its grant, whatever they hold.</summary>
+        [Fact]
+        public void AccrueIncome_NpcFactionGrant_IgnoresMemberWallets()
+        {
+            long withdrawn;
+            long granted = RunOneNodePlayerFaction(20, true, 1.0, false, out withdrawn);
+
+            Assert.Equal(20 * 17000L, granted);
+        }
+
+        [Fact]
+        public void AccrueIncome_PlayerFactionGrant_GrantsOnlyWhatMembersCannotCover()
+        {
+            var wealth = new FakeMemberWealth();
+            var state = new FactionState { Tag = "EXP", IsPlayerFaction = true };
+            WorldModel world = OneNodeGrantWorld(state, 1.0, wealth);
+            wealth.Balances["EXP"] = 70000;
+
+            world.AccrueIncome(new[] { state });
+
+            // Target 75,000 after 1,500 upkeep took the treasury to -1,500: 75,000 - (-1,500 + 70,000).
+            Assert.Equal(5000, world.GetTreasury("EXP"));
+            Assert.Contains(world.SnapshotCentralBankEvents(), e => e.Type == "grant" && e.FactionTag == "EXP" && e.Amount == 6500);
+        }
+
+        [Fact]
+        public void AccrueIncome_PlayerFactionGrant_DeniedWhenMembersCoverTheTarget()
+        {
+            var wealth = new FakeMemberWealth();
+            var state = new FactionState { Tag = "EXP", IsPlayerFaction = true };
+            WorldModel world = OneNodeGrantWorld(state, 1.0, wealth);
+            wealth.Balances["EXP"] = 500000;
+            DebugTraces.CentralBankDenials = true;   // per-process static; Dispose restores it
+
+            world.AccrueIncome(new[] { state });
+
+            Assert.Equal(-1500, world.GetTreasury("EXP"));
+            Assert.DoesNotContain(world.SnapshotCentralBankEvents(), e => e.Type == "grant" && e.FactionTag == "EXP");
+            Assert.Contains(world.SnapshotCentralBankEvents(),
+                e => e.Type == "grant-denied" && e.FactionTag == "EXP" && e.Message.Contains("Members' own wallets"));
+        }
+
+        /// <summary>A withdrawal is a transfer to a member, not burn: it leaves net flow alone, so it
+        /// cannot lift the runway term of the next grant target.</summary>
+        [Fact]
+        public void BookMemberWithdrawal_DebitsTreasury_WithoutReadingAsBurn()
+        {
+            var state = new FactionState { Tag = "EXP", IsPlayerFaction = true };
+            WorldModel world = OneNodeGrantWorld(state, 1.0, new FakeMemberWealth());
+            world.Tuning.CentralBankGrantAmount = 0;   // keep the bank out of this pass's net flow
+            world.SetTreasury("EXP", 100000);
+
+            world.BookMemberWithdrawal("EXP", 40000);
+            Assert.Equal(60000, world.GetTreasury("EXP"));
+            world.AccrueIncome(new[] { state });
+
+            Assert.Equal(-1500, world.GetNetFlow("EXP"));
+        }
+
+        /// <summary>One founded node with one Manufactory level, on the shipped grant tuning: collateral
+        /// 850k, grant target 75k, per-event cap 17k. The adjustment fraction is opened to 1.0 because a
+        /// one-faction world's money gap is tiny; live (2026-11-25) the gap was 1.59B, a 15.9M budget
+        /// per pass, which no 17k grant reaches.</summary>
+        private static WorldModel OneNodeGrantWorld(FactionState state, double memberWealthFraction, IMemberWealth wealth)
+        {
+            var world = TestSupport.World();
+            world.Tuning.UpkeepPerSource = 1500;
+            world.Tuning.DebtInterestRate = 0;
+            world.Tuning.LoanAmount = 0;
+            world.Tuning.DebtRatio = 0;
+            world.Tuning.CentralBankReserveRatio = 0.4;
+            world.Tuning.CentralBankMaxAdjustmentFractionPerTick = 1.0;
+            world.Tuning.CentralBankTerritoryNodeValue = 250000;
+            world.Tuning.CentralBankFoundedNodeValue = 500000;
+            world.Tuning.CentralBankCapabilityLevelValue = 100000;
+            world.Tuning.CentralBankShipValue = 0;
+            world.Tuning.CentralBankGrantAmount = 1000000;
+            world.Tuning.CentralBankGrantTreasuryBuffer = 75000;
+            world.Tuning.CentralBankGrantRunwayTicks = 12.0;
+            world.Tuning.CentralBankGrantCollateralFraction = 0.02;
+            world.Tuning.CentralBankGrantCooldown = TimeSpan.FromSeconds(60);
+            world.Tuning.CentralBankGrantMemberWealthFraction = memberWealthFraction;
+            world.Tuning.CentralBankSupportLoanAmount = 0;
+            world.MemberWealth = wealth;
+
+            var node = world.Graph.Add(new Vec3(0, 0, 0), 0.05, "N1");
+            node.OwnerFactionTag = state.Tag;
+            node.HoldStrength = 0.5;
+            node.StableStationId = 1;
+            node.Capabilities[NodeCapabilityKind.Manufactory] = 1;
+
+            world.SetTreasury(state.Tag, 0);
+            Assert.Equal(850000, world.GetFactionCollateralValue(state.Tag, state));
+            return world;
+        }
+
+        /// <summary><paramref name="drain"/> models a member withdrawing the whole faction balance before
+        /// each pass the way <c>FactionWalletTransferPatch</c> books it, and the member's wallet holding
+        /// it afterwards.</summary>
+        private static long RunOneNodePlayerFaction(int passes, bool drain, double memberWealthFraction,
+            bool isPlayer, out long withdrawn)
+        {
+            var wealth = new FakeMemberWealth();
+            var state = new FactionState { Tag = "EXP", IsPlayerFaction = isPlayer };
+            WorldModel world = OneNodeGrantWorld(state, memberWealthFraction, wealth);
+
+            withdrawn = 0;
+            for (int i = 0; i < passes; i++)
+            {
+                world.UtcNow = world.UtcNow.AddSeconds(180);
+                long balance = world.GetTreasury("EXP");
+                if (drain && balance > 0)
+                {
+                    world.BookMemberWithdrawal("EXP", balance);
+                    withdrawn += balance;
+                    wealth.Balances["EXP"] = withdrawn;
+                }
+                world.AccrueIncome(new[] { state });
+                Assert.Equal(0, world.GetDebt("EXP"));
+            }
+            long last = world.GetTreasury("EXP");
+            if (drain && last > 0) withdrawn += last;
+
+            long granted = 0;
+            foreach (MonetaryEvent e in world.SnapshotCentralBankEvents())
+                if (e.Type == "grant" && e.FactionTag == "EXP") granted += e.Amount;
+            return granted;
+        }
+
+        private sealed class FakeMemberWealth : IMemberWealth
+        {
+            public readonly Dictionary<string, long> Balances = new Dictionary<string, long>();
+            public long MemberWealth(FactionState faction)
+            {
+                long v;
+                return faction != null && Balances.TryGetValue(faction.Tag, out v) ? v : 0;
+            }
+        }
+
         [Fact]
         public void AccrueIncome_CentralBankSupportLoan_RespectsCooldownAndCollateralCap()
         {

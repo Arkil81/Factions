@@ -332,6 +332,32 @@ namespace Factions
         /// the station and asteroid observation scans and the player-presence scan all ask the same
         /// question about the same immobile node set, and one index answers all of them.</para></summary>
         private NodeProximityIndex _nodeIndex;
+        private NodeStages _nodeStages;
+        private Func<SpatialNode, DefenceReading> _nodeDefence;
+
+        /// <summary>Reads any node's defence band now, with the Guards committed at the start of the
+        /// last knowledge sweep counted. Built on first read before that, like
+        /// <see cref="NodeStages"/>.</summary>
+        internal Func<SpatialNode, DefenceReading> NodeDefence
+        {
+            get
+            {
+                if (_nodeDefence == null) _nodeDefence = Factions.Core.NodeDefence.Readings(_world.PrefabCatalogue, _tuning, _states);
+                return _nodeDefence;
+            }
+        }
+
+        /// <summary>Every node's economic stage, with each faction's capital, as of the start of the
+        /// last knowledge sweep. Built on first read before that, so the HUD and the map never see
+        /// null. Rebuilt once per global pass because capitals move only with development.</summary>
+        internal NodeStages NodeStages
+        {
+            get
+            {
+                if (_nodeStages == null) _nodeStages = NodeStages.Build(_world.Graph, _tuning);
+                return _nodeStages;
+            }
+        }
         private int _knowledgeSweepCursor;
         private int _knowledgeTouchedThisPass;
         private long _knowledgeBlockedAtPassStart;
@@ -713,6 +739,8 @@ namespace Factions
             // and the first frame after Load reconciles the SE wallet to the sim ledger (FAC-181).
             if (_economy != null)
                 _world.TreasuryMirror = new LedgerMirror(_economy, FindFaction, msg => _log.Write(msg));
+            if (_economy != null)
+                _world.MemberWealth = new SeMemberWealth();
             // Construct oracle and TradeManager after registries are wired so RecomputeAll
             // uses the real SeItemRegistry (not NullItemRegistry) for RareOre resolution.
             _oracle = new PriceOracle(_world, _tuning);
@@ -1779,6 +1807,8 @@ namespace Factions
                     // bounded work but it is not free, and admitting the whole roster in one frame is
                     // exactly the ungoverned-observer shape FAC-016 flags.
                     if (_knowledgeSweepCursor == 0) EnsureNodeIndex();
+                    if (_knowledgeSweepCursor == 0) _nodeStages = NodeStages.Build(_world.Graph, _tuning);
+                    if (_knowledgeSweepCursor == 0) _nodeDefence = Factions.Core.NodeDefence.Readings(_world.PrefabCatalogue, _tuning, _states);
                     if (_knowledgeSweepCursor == 0) RefreshPlayerContacts();
                     if (_knowledgeSweepCursor == 0) _knowledgeBlockedAtPassStart = SensorOcclusion.BlockedLines;
                     if (_knowledgeSweepCursor < _states.Count)
@@ -1787,7 +1817,7 @@ namespace Factions
                         DateTime nowUtc = _world.UtcNow;
                         SensorOcclusion occlusion = SensorOcclusion;
                         int touched = KnowledgeSweep.SweepOwnedNodes(
-                            _world.Graph, _nodeIndex, st, _tuning, nowUtc, occlusion);
+                            _world.Graph, _nodeIndex, st, _tuning, nowUtc, occlusion, _nodeStages, _nodeDefence);
                         // A convoy surveys the whole leg it flew since the previous sweep, not just
                         // where it happens to be now. The previous position is derived from the
                         // fleet's own progress one sweep ago -- TransitProgressRatio clamps at both
@@ -1808,7 +1838,7 @@ namespace Factions
                                 _world.Graph, _nodeIndex, st,
                                 fleet.CurrentPosKm(priorUtc, _tuning),
                                 fleet.CurrentPosKm(nowUtc, _tuning),
-                                _tuning, nowUtc, _knowledgeScratch, _knowledgeScratchSeen, occlusion);
+                                _tuning, nowUtc, _knowledgeScratch, _knowledgeScratchSeen, occlusion, _nodeStages, _nodeDefence);
                         }
                         _knowledgeTouchedThisPass += touched;
                         SweepSensedPlayers(st, nowUtc);
@@ -10915,6 +10945,7 @@ namespace Factions
                         MissionKind = (byte)fleet.Kind,
                         ConvoySize = fleet.ConvoySize,
                         TacticHint = TacticHintFor(fleet, now),
+                        WeaponDps = ShipPool.TotalDps(fleet.WeaponBands),
                     });
                 }
             }
@@ -11122,6 +11153,10 @@ namespace Factions
                         Signature = FleetSensing.SignatureOf(fleet, _world.PrefabCatalogue, _itemVolumes, _tuning, now),
                         BroadcastRadiusKm = BroadcastKmOf(fleet),
                         MaterialisedEntityId = fleet.MaterialisedEntityId > 0 ? fleet.MaterialisedEntityId : 0L,
+                        EngagementTargetNodeId = fleet.CurrentStopKind == FleetStopKind.Engage
+                                                 || fleet.CurrentStopKind == FleetStopKind.Intercept
+                            ? fleet.TargetNodeId : null,
+                        WeaponDps = ShipPool.TotalDps(fleet.WeaponBands),
                         RoutedStops = ResolveStopPositions(fleet)
                     });
                 }

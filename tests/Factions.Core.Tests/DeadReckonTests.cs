@@ -83,5 +83,21 @@ namespace Factions.Core.Tests
                 out x, out y, out z);
             Assert.Equal(1000.0, y, 9);
         }
+
+        [Fact]
+        public void ExtrapolateOpen_CoastsPastWhereAClampWouldStopAndHoldsAtTheHorizon()
+        {
+            double x, y, z;
+            DeadReckon.ExtrapolateOpen(0, 0, 0, 10, 0, -2, 5, out x, out y, out z);
+            Assert.Equal(50.0, x);
+            Assert.Equal(-10.0, z);
+
+            DeadReckon.ExtrapolateOpen(0, 0, 0, 10, 0, 0, DeadReckon.OpenHorizonSeconds * 4, out x, out y, out z);
+            Assert.Equal(10.0 * DeadReckon.OpenHorizonSeconds, x);
+
+            DeadReckon.ExtrapolateOpen(7, 8, 9, 10, 10, 10, -3, out x, out y, out z);
+            Assert.Equal(7.0, x);
+            Assert.Equal(9.0, z);
+        }
     }
 }

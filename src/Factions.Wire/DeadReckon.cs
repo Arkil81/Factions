@@ -16,6 +16,30 @@ namespace Factions.Wire
         /// destination looks worse than arriving slightly early and waiting. A contact that is not
         /// moving, or is being asked about the instant it was sampled, is simply where it was.
         /// </summary>
+        /// <summary>How long a contact with no offered destination keeps coasting on its last
+        /// velocity, seconds. The server corrects it every pass; past this the sample is stale and
+        /// the marker holds where it reckoned to rather than sailing on.</summary>
+        public const double OpenHorizonSeconds = 15.0;
+
+        /// <summary>
+        /// Dead reckoning for a contact whose destination was not offered: straight along the last
+        /// velocity, with no target to stop at, for at most <see cref="OpenHorizonSeconds"/>. A
+        /// fleet decelerating onto a node therefore overshoots by up to one pass, and the next
+        /// sample pulls it back; that is the price of not being told where it is going.
+        /// </summary>
+        public static void ExtrapolateOpen(
+            double posX, double posY, double posZ,
+            double velX, double velY, double velZ,
+            double elapsed,
+            out double x, out double y, out double z)
+        {
+            if (elapsed < 0) elapsed = 0;
+            if (elapsed > OpenHorizonSeconds) elapsed = OpenHorizonSeconds;
+            x = posX + velX * elapsed;
+            y = posY + velY * elapsed;
+            z = posZ + velZ * elapsed;
+        }
+
         public static void Extrapolate(
             double posX, double posY, double posZ,
             double velX, double velY, double velZ,

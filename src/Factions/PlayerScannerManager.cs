@@ -7,6 +7,7 @@ using Sandbox.Game.Entities;
 using Sandbox.Game.Screens.Helpers;
 using Sandbox.Game.World;
 using VRage.Game;
+using VRage.Game.Entity;
 using VRageMath;
 
 namespace Factions
@@ -26,6 +27,10 @@ namespace Factions
         /// <summary>Authority on a cluster: the players on agents, with the seat each reports. Null
         /// everywhere else.</summary>
         internal Func<IList<RemotePlayer>> RemotePlayers;
+
+        /// <summary>Grids the sim does not own, refreshed by the plugin before this tick (FAC-533).
+        /// Null where the plugin has none to offer.</summary>
+        internal Func<List<ScannerGridCandidate>> Grids;
 
         public PlayerScannerManager(FactionRuntime runtime, string storageDir, UplinkManager uplink)
         {
@@ -86,6 +91,7 @@ namespace Factions
             if (_runtime == null || _runtime.World == null || MySession.Static == null) return 0;
             var online = new HashSet<long>();
             List<ScannerFleetCandidate> fleets = _runtime.GetScannerFleetCandidates();
+            List<ScannerGridCandidate> grids = Grids != null ? Grids() : null;
             int visible = 0;
 
             foreach (MyPlayer player in MySession.Static.Players.GetOnlinePlayers())
@@ -132,11 +138,12 @@ namespace Factions
                 Vector3D pos = controller.CubeGrid.PositionComp.GetPosition();
                 ShipAntennas.Read(controller.CubeGrid, identityId, _antennas);
                 visible += Scan(identityId, player.Id.SteamId, state, level, controller.CubeGrid.EntityId,
+                    FactionsPlugin.GroupLeadOf(controller.CubeGrid),
                     new Vec3(pos.X / 1000.0, pos.Y / 1000.0, pos.Z / 1000.0),
-                    ShipSensor.StrengthKm(_antennas, _runtime.World.Tuning), _antennas.Count, fleets);
+                    ShipSensor.StrengthKm(_antennas, _runtime.World.Tuning), _antennas.Count, fleets, grids);
             }
 
-            visible += TickRemote(online, fleets);
+            visible += TickRemote(online, fleets, grids);
 
             var stale = new List<long>();
             foreach (KeyValuePair<long, PlayerScannerState> pair in _states)
@@ -157,8 +164,8 @@ namespace Factions
         /// record the nodes seen, and reconcile them onto the HUD or the linked client. Returns the
         /// number of contacts visible.</summary>
         private int Scan(long identityId, ulong steamId, PlayerScannerState state, int level,
-                         long gridEntityId, Vec3 origin, double rangeKm, int antennaCount,
-                         List<ScannerFleetCandidate> fleets)
+                         long gridEntityId, long gridLeadId, Vec3 origin, double rangeKm, int antennaCount,
+                         List<ScannerFleetCandidate> fleets, List<ScannerGridCandidate> grids)
         {
             if (state.ActiveGridEntityId != 0 && state.ActiveGridEntityId != gridEntityId)
             {
@@ -171,6 +178,7 @@ namespace Factions
                 state.ResetReason = "grid-switch";
             }
             state.ActiveGridEntityId = gridEntityId;
+            state.ActiveGridLeadId = gridLeadId;
 
             state.AntennaCount = antennaCount;
             state.GridSensor = new SensorSource { PositionKm = origin, StrengthKm = rangeKm };
@@ -178,32 +186,56 @@ namespace Factions
             IList<ScannerContact> contacts = PlayerScanner.Resolve(
                 level, origin, rangeKm, _runtime.World.Graph.Nodes.Values, fleets,
                 _runtime.World.Tuning, _runtime.World.PriceCatalogue, _runtime.World.Registry,
-                _runtime.SensorOcclusion);
+                _runtime.SensorOcclusion, grids, gridLeadId);
+            // Grade before Reconcile: the tracker still holds last pass's tiers, which the
+            // hysteresis reads. Withhold after it, so nothing above the tier reaches the wire.
+            PlayerScanner.Grade(contacts, state.Tracker,
+                tag => _relations.For(tag, identityId, false) == WireRelation.Own, _runtime.World.Tuning,
+                identityId);
             // The player's own detections are their personal map. Nearly free here: the scan
             // that produced these contacts has already run for the HUD.
             //
             // Each entry carries what was seen, not just when -- the owner and hold as of this
-            // moment -- because the map draws a remembered node from that snapshot and has
-            // nothing else to draw it from. The contact on the HUD already names the owner, so
-            // the record and the screen say the same thing.
+            // moment, and the tier the HUD graded it at -- because the map draws a remembered node
+            // from that snapshot and has nothing else to draw it from. Recorded after Grade and
+            // before Withhold, so the tier is known and the owner is still the true one.
             if (_knowledge != null)
             {
+                NodeStages stages = _runtime.NodeStages;
+                Func<SpatialNode, DefenceReading> defenceOf = _runtime.NodeDefence;
+                TimeSpan fleetWindow = FactionIntelEstimate.FleetWindow(_runtime.World.Tuning);
+                TimeSpan staleAfter = IntelGrade.StaleAfter(_runtime.World.Tuning);
                 DateTime seenUtc = _runtime.World.UtcNow;
                 for (int c = 0; c < contacts.Count; c++)
                 {
                     ScannerContact contact = contacts[c];
-                    if (contact.Kind == ScannerContactKind.Fleet) continue;   // fleets are never remembered
+                    if (contact.Kind == ScannerContactKind.Fleet || contact.Kind == ScannerContactKind.RaidEngagement
+                        || contact.Kind == ScannerContactKind.Grid)
+                    {
+                        // A fleet is never remembered, but a close look at one is a fact about its
+                        // faction: the strongest seen feeds the Factions page's strength estimate.
+                        // Full is the viewer's own, whose figures are exact.
+                        if (contact.Tier == IntelTier.Armament && !string.IsNullOrEmpty(contact.OwnerTag))
+                            _knowledge.RecordSighting(identityId, contact.OwnerTag, contact.WeaponDps, seenUtc, fleetWindow);
+                        continue;
+                    }
                     if (string.IsNullOrEmpty(contact.Key)) continue;
                     const string nodePrefix = "node:";
                     if (!contact.Key.StartsWith(nodePrefix, StringComparison.Ordinal)) continue;
                     string detectedId = contact.Key.Substring(nodePrefix.Length);
                     SpatialNode detected;
                     if (_runtime.World.Graph.Nodes.TryGetValue(detectedId, out detected) && detected != null)
-                        _knowledge.Touch(identityId, detected, seenUtc);
+                        _knowledge.Touch(identityId, detected, seenUtc, contact.Tier,
+                                         stages != null ? stages.Of(detected) : NodeStage.None, staleAfter,
+                                         contact.Tier >= IntelTier.Armament && defenceOf != null
+                                             ? defenceOf(detected) : default(DefenceReading));
                     else
                         _knowledge.Touch(identityId, detectedId, seenUtc);
                 }
             }
+            PlayerScanner.Withhold(contacts, tag => OffersFlightPlan(_relations.For(tag, identityId, false)),
+                                   _runtime.World.Tuning);
+            if (DebugTraces.Intel) TraceIntel(steamId, state, contacts);
             Reconcile(identityId, state, contacts, steamId);
             _relations.Clear();
             return contacts.Count;
@@ -213,7 +245,8 @@ namespace Factions
         /// so the scan runs from the seat their agent reports, with the sensor strength it read from
         /// the grid's antennas. Only a linked client is scanned for. A relayed player has no GPS
         /// path, because GPS markers would be added on a server they are not on.</summary>
-        private int TickRemote(HashSet<long> online, List<ScannerFleetCandidate> fleets)
+        private int TickRemote(HashSet<long> online, List<ScannerFleetCandidate> fleets,
+                               List<ScannerGridCandidate> grids)
         {
             Func<IList<RemotePlayer>> source = RemotePlayers;
             if (source == null || _uplink == null) return 0;
@@ -245,8 +278,8 @@ namespace Factions
                     continue;
                 }
                 Vec3 m = p.GridPositionM;
-                visible += Scan(p.IdentityId, p.SteamId, state, level, p.SeatGridId,
-                    new Vec3(m.X / 1000.0, m.Y / 1000.0, m.Z / 1000.0), p.SensorKm, p.AntennaCount, fleets);
+                visible += Scan(p.IdentityId, p.SteamId, state, level, p.SeatGridId, p.SeatGridId,
+                    new Vec3(m.X / 1000.0, m.Y / 1000.0, m.Z / 1000.0), p.SensorKm, p.AntennaCount, fleets, grids);
             }
             return visible;
         }
@@ -263,10 +296,32 @@ namespace Factions
             return true;
         }
 
+        /// <summary>The group lead of the grid this player's scanner is running on, or zero. The map
+        /// leaves it out the way the scanner does.</summary>
+        public long ActiveGridLeadOf(long identityId)
+        {
+            PlayerScannerState state;
+            return _states.TryGetValue(identityId, out state) && state.HasGridSensor ? state.ActiveGridLeadId : 0;
+        }
+
         /// <summary>One player's personal detections, for the viewer union. Never null.</summary>
         public FactionKnowledge KnowledgeFor(long identityId)
         {
             return _knowledge.For(identityId);
+        }
+
+        /// <summary>One player's fleet sightings, for the Factions page. Never null.</summary>
+        public FleetSightings SightingsFor(long identityId)
+        {
+            return _knowledge.SightingsFor(identityId);
+        }
+
+        /// <summary>A fleet seen at Armament from the map, which grades fleets on its own pass.</summary>
+        public void RecordSighting(long identityId, string tag, double dps)
+        {
+            if (_runtime == null || _runtime.World == null) return;
+            _knowledge.RecordSighting(identityId, tag, dps, _runtime.World.UtcNow,
+                                      FactionIntelEstimate.FleetWindow(_runtime.World.Tuning));
         }
 
         public string SetLevel(string steamId, int level)
@@ -306,6 +361,10 @@ namespace Factions
                 1, origin, range, _runtime.World.Graph.Nodes.Values, _runtime.GetScannerFleetCandidates(),
                 _runtime.World.Tuning, _runtime.World.PriceCatalogue, _runtime.World.Registry,
                 _runtime.SensorOcclusion);
+            // Graded cold and as nobody's faction: the tiers a stranger arriving here would see.
+            PlayerScanner.Grade(contacts, null, null, tuning);
+            var tiers = new int[(int)IntelTier.Full + 1];
+            foreach (ScannerContact contact in contacts) tiers[(int)contact.Tier]++;
             var counts = new Dictionary<ScannerContactKind, int>();
             // The motion sample a client dead-reckons from, summarised: a contact that reaches the
             // wire with no velocity is drawn as a five-second step, and this is the only way to see
@@ -329,7 +388,9 @@ namespace Factions
             return "scanner probe " + (large ? "large" : "small") + " range=" + range
                 + "km contacts=" + contacts.Count + (parts.Count > 0 ? " " + string.Join(" ", parts) : "")
                 + " moving=" + moving
-                + " fastest=" + fastest.ToString("0.00", CultureInfo.InvariantCulture) + "km/min";
+                + " fastest=" + fastest.ToString("0.00", CultureInfo.InvariantCulture) + "km/min"
+                + " tiers contact=" + tiers[(int)IntelTier.Contact] + " class=" + tiers[(int)IntelTier.Class]
+                + " identity=" + tiers[(int)IntelTier.Identity] + " armament=" + tiers[(int)IntelTier.Armament];
         }
 
         public void Close()
@@ -366,8 +427,10 @@ namespace Factions
 
             foreach (string key in delta.RemovedKeys) Delete(identityId, state, key, true);
 
+            // Grid contacts are for the client plugin only. On the GPS path SE's own antenna HUD
+            // already draws every grid that broadcasts, and a GPS per derelict is clutter.
             foreach (ScannerContact contact in delta.UpdatedContacts)
-                AddOrRefresh(identityId, state, contact, false);
+                if (contact.Kind != ScannerContactKind.Grid) AddOrRefresh(identityId, state, contact, false);
 
             // A scan can discover a cluster in one pass. Play at most one notification sound for
             // that pass; every genuinely new contact is still recorded as present and remains silent
@@ -375,6 +438,7 @@ namespace Factions
             bool playSound = true;
             foreach (ScannerContact contact in delta.NewContacts)
             {
+                if (contact.Kind == ScannerContactKind.Grid) continue;
                 AddOrRefresh(identityId, state, contact, playSound);
                 playSound = false;
             }
@@ -444,7 +508,9 @@ namespace Factions
                     EntityId = c.EntityId,
                     Unclaimed = c.Unclaimed,
                     Relation = (byte)RelationFor(c, viewerIdentityId),
+                    Tier = (byte)c.Tier,
                     Moving = c.Moving,
+                    HasTarget = c.HasFlightPlan,
                     VelXKmPerMin = c.VelocityKmPerMin.X,
                     VelYKmPerMin = c.VelocityKmPerMin.Y,
                     VelZKmPerMin = c.VelocityKmPerMin.Z,
@@ -507,9 +573,60 @@ namespace Factions
         // the map feature, so both send a player the same standing for the same faction.
         private readonly ViewerRelations _relations = new ViewerRelations("scanner");
 
+        /// <summary>INTEL_GRADES: this viewer's contacts by tier, logged when the census changes.</summary>
+        private static void TraceIntel(ulong steamId, PlayerScannerState state, IList<ScannerContact> contacts)
+        {
+            int contact = 0, cls = 0, identity = 0, armament = 0, full = 0, squawking = 0;
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                switch (contacts[i].Tier)
+                {
+                    case IntelTier.Contact:  contact++; break;
+                    case IntelTier.Class:    cls++; break;
+                    case IntelTier.Identity: identity++; break;
+                    case IntelTier.Armament: armament++; break;
+                    case IntelTier.Full:     full++; break;
+                }
+                if (contacts[i].Transponder) squawking++;
+            }
+            string census = "contacts=" + contacts.Count + " contact=" + contact + " class=" + cls
+                + " identity=" + identity + " armament=" + armament + " full=" + full + " squawking=" + squawking;
+            if (census == state.LastIntelCensus) return;
+            state.LastIntelCensus = census;
+            FactionsPlugin.Log.Info("INTEL_GRADES steam=" + steamId + " sensorKm="
+                + state.GridSensor.StrengthKm.ToString("0.0", CultureInfo.InvariantCulture) + " " + census);
+        }
+
+        /// <summary>Whether a fleet's owner shares its flight plan with a viewer at this standing.
+        /// The map reads the same rule.</summary>
+        internal static bool OffersFlightPlan(WireRelation relation)
+        {
+            return relation == WireRelation.Own || relation == WireRelation.Friendly;
+        }
+
         private WireRelation RelationFor(ScannerContact contact, long viewerIdentityId)
         {
+            if (contact.Kind == ScannerContactKind.Grid) return GridRelation(_relations, contact.OwnerTag,
+                contact.OwnerIdentityId, viewerIdentityId);
             return _relations.For(contact.OwnerTag, viewerIdentityId, contact.Unclaimed);
+        }
+
+        /// <summary>A grid's colour for one viewer. A grid the viewer owns is their own; a faction's
+        /// grid takes the faction's standing; a factionless owner's takes SE's player-to-player
+        /// relation; an unowned grid, and one whose owner is withheld, is grey. The map reads the same.</summary>
+        internal static WireRelation GridRelation(ViewerRelations relations, string ownerTag, long ownerIdentityId,
+                                                  long viewerIdentityId)
+        {
+            if (ownerIdentityId == 0) return WireRelation.Unknown;
+            if (ownerIdentityId == viewerIdentityId) return WireRelation.Own;
+            if (!string.IsNullOrEmpty(ownerTag)) return relations.For(ownerTag, viewerIdentityId);
+            switch (MyIDModule.GetRelationPlayerPlayer(ownerIdentityId, viewerIdentityId))
+            {
+                case MyRelationsBetweenPlayers.Self: return WireRelation.Own;
+                case MyRelationsBetweenPlayers.Allies: return WireRelation.Friendly;
+                case MyRelationsBetweenPlayers.Neutral: return WireRelation.Neutral;
+                default: return WireRelation.Enemy;
+            }
         }
 
         private static void AddOrRefresh(
@@ -628,6 +745,7 @@ namespace Factions
             public readonly Dictionary<string, int> Hashes =
                 new Dictionary<string, int>(StringComparer.Ordinal);
             public long ActiveGridEntityId;
+            public long ActiveGridLeadId;
             /// <summary>Where this player's own scanner is looking from and how far, as of the last
             /// tick. Stashed rather than recomputed by the map, which runs one line later in the same
             /// frame: two derivations of "which grid is this player flying" would drift apart, and
@@ -647,6 +765,8 @@ namespace Factions
             public readonly Dictionary<string, string> SentRelations =
                 new Dictionary<string, string>(StringComparer.Ordinal);
             public int SentGeneration;
+            /// <summary>Under <c>factions debug intel</c> only: the last INTEL_GRADES census logged.</summary>
+            public string LastIntelCensus;
         }
     }
 }

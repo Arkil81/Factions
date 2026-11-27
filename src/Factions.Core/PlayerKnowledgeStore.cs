@@ -24,6 +24,7 @@ namespace Factions.Core
         private readonly string _path;
         private readonly Dictionary<long, FactionKnowledge> _byIdentity =
             new Dictionary<long, FactionKnowledge>();
+        private readonly Dictionary<long, FleetSightings> _sightings = new Dictionary<long, FleetSightings>();
         private bool _dirty;
 
         public PlayerKnowledgeStore(string storageDir)
@@ -66,17 +67,46 @@ namespace Factions.Core
         /// the moment of detection, so nothing is learned here that the player was not shown.</para></summary>
         public void Touch(long identityId, SpatialNode node, DateTime utc)
         {
+            Touch(identityId, node, utc, IntelTier.None, NodeStage.None, TimeSpan.Zero);
+        }
+
+        /// <summary>As above, with the tier the HUD graded the contact at, the stage it saw and, at
+        /// Armament or better, the defence band.</summary>
+        public void Touch(long identityId, SpatialNode node, DateTime utc, IntelTier tier, NodeStage stage,
+                          TimeSpan staleAfter, DefenceReading defence = default(DefenceReading))
+        {
             if (node == null || string.IsNullOrEmpty(node.Id)) return;
-            For(identityId).Touch(node, utc);
+            For(identityId).Touch(node, utc, tier, stage, staleAfter, defence);
             _dirty = true;
         }
 
+        /// <summary>The player's fleet sightings; an empty record for a player who has none.</summary>
+        public FleetSightings SightingsFor(long identityId)
+        {
+            FleetSightings s;
+            if (!_sightings.TryGetValue(identityId, out s))
+            {
+                s = new FleetSightings();
+                _sightings[identityId] = s;
+            }
+            return s;
+        }
+
+        /// <summary>A fleet of <paramref name="tag"/> seen at Armament with <paramref name="dps"/>.</summary>
+        public void RecordSighting(long identityId, string tag, double dps, DateTime utc, TimeSpan window)
+        {
+            if (SightingsFor(identityId).Record(tag, dps, utc, window)) _dirty = true;
+        }
+
         /// <summary>Drops lapsed entries across every player. The retention bound on this file, and
-        /// purely a size measure -- expiry itself is evaluated at read.</summary>
+        /// purely a size measure -- expiry itself is evaluated at read. A fleet sighting older than the
+        /// horizon is past any fleet window too.</summary>
         public int Compact(DateTime nowUtc, TimeSpan horizon)
         {
             int dropped = 0;
             foreach (KeyValuePair<long, FactionKnowledge> pair in _byIdentity)
+                dropped += pair.Value.Compact(nowUtc, horizon);
+            foreach (KeyValuePair<long, FleetSightings> pair in _sightings)
                 dropped += pair.Value.Compact(nowUtc, horizon);
             if (dropped > 0) _dirty = true;
             return dropped;
@@ -95,15 +125,18 @@ namespace Factions.Core
                 if (pair.Value.Count == 0) continue;   // an empty player is not worth a line
                 var entries = new Dictionary<string, KnowledgeEntryDoc>(StringComparer.Ordinal);
                 foreach (KeyValuePair<string, KnownNode> e in pair.Value.Snapshots)
-                    entries[e.Key] = new KnowledgeEntryDoc
-                    {
-                        T = e.Value.LastSeenUtc,
-                        HasDetail = e.Value.HasDetail,
-                        O = e.Value.OwnerTag,
-                        H = e.Value.HoldStrength,
-                        V = e.Value.ResourceValue,
-                    };
+                    entries[e.Key] = KnowledgeEntryDoc.From(e.Value);
                 doc.Players[pair.Key.ToString()] = entries;
+            }
+            foreach (KeyValuePair<long, FleetSightings> pair in _sightings)
+            {
+                if (pair.Value.Count == 0) continue;
+                var byTag = new Dictionary<string, SightingDoc>(StringComparer.OrdinalIgnoreCase);
+                foreach (KeyValuePair<string, FleetSighting> s in pair.Value.Entries)
+                    byTag[s.Key] = new SightingDoc { S = s.Value.Dps, T = s.Value.Utc };
+                if (doc.Sightings == null)
+                    doc.Sightings = new Dictionary<string, Dictionary<string, SightingDoc>>(StringComparer.Ordinal);
+                doc.Sightings[pair.Key.ToString()] = byTag;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(_path));
@@ -125,7 +158,20 @@ namespace Factions.Core
             {
                 if (!File.Exists(_path)) return;
                 KnowledgeFile doc = JsonConvert.DeserializeObject<KnowledgeFile>(File.ReadAllText(_path));
-                if (doc == null || doc.Players == null) return;
+                if (doc == null) return;
+                if (doc.Sightings != null)
+                {
+                    foreach (KeyValuePair<string, Dictionary<string, SightingDoc>> pair in doc.Sightings)
+                    {
+                        long identityId;
+                        if (!long.TryParse(pair.Key, out identityId) || pair.Value == null) continue;
+                        FleetSightings s = SightingsFor(identityId);
+                        foreach (KeyValuePair<string, SightingDoc> e in pair.Value)
+                            if (e.Value != null)
+                                s.Load(e.Key, new FleetSighting { Dps = e.Value.S, Utc = ToUtc(e.Value.T) });
+                    }
+                }
+                if (doc.Players == null) return;
                 foreach (KeyValuePair<string, Dictionary<string, KnowledgeEntryDoc>> pair in doc.Players)
                 {
                     long identityId;
@@ -134,14 +180,7 @@ namespace Factions.Core
                     foreach (KeyValuePair<string, KnowledgeEntryDoc> e in pair.Value)
                     {
                         if (e.Value == null) continue;
-                        loaded[e.Key] = new KnownNode
-                        {
-                            LastSeenUtc = e.Value.T,
-                            HasDetail = e.Value.HasDetail,
-                            OwnerTag = e.Value.O,
-                            HoldStrength = e.Value.H,
-                            ResourceValue = e.Value.V,
-                        };
+                        loaded[e.Key] = e.Value.ToKnownNode();
                     }
                     var knowledge = new FactionKnowledge();
                     knowledge.LoadFrom(loaded);
@@ -154,7 +193,13 @@ namespace Factions.Core
                 // knowledge source is derived or held elsewhere -- so starting empty beats refusing
                 // to boot.
                 _byIdentity.Clear();
+                _sightings.Clear();
             }
+        }
+
+        private static DateTime ToUtc(DateTime dt)
+        {
+            return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
         }
 
         /// <summary>Schema 2 carries the detail a detection saw, written by
@@ -165,6 +210,16 @@ namespace Factions.Core
         {
             public int SchemaVersion { get; set; }
             public Dictionary<string, Dictionary<string, KnowledgeEntryDoc>> Players { get; set; }
+            /// <summary>Per identity, per faction tag: the strongest fleet seen at Armament. Omitted
+            /// while nobody has one.</summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public Dictionary<string, Dictionary<string, SightingDoc>> Sightings { get; set; }
+        }
+
+        private sealed class SightingDoc
+        {
+            public float S { get; set; }
+            public DateTime T { get; set; }
         }
     }
 }

@@ -108,12 +108,12 @@ namespace Factions.Core.Tests
             // LogDebugToggleState enumerates this; a trace missing from it is on with no way to know.
             var names = new List<string>();
             foreach (var kv in DebugTraces.All()) names.Add(kv.Key);
-            Assert.Equal(32, names.Count);
+            Assert.Equal(33, names.Count);
             foreach (string n in new[] { "produced", "itemxfer", "upkeep", "itemdemand", "shipevents",
                                          "investment", "bankdenials", "braindecisions", "slots",
                                          "diplomacy", "grids", "fuel", "buildrate", "sensing",
                                          "contracts", "econtick", "governor", "munitions", "consent",
-                                         "storebar", "extraction", "tactics", "restore", "admission", "physics", "alloc", "landing", "trespass", "asminput", "relation", "seats" })
+                                         "storebar", "extraction", "tactics", "restore", "admission", "physics", "alloc", "landing", "trespass", "asminput", "relation", "seats", "intel" })
                 Assert.Contains(n, names);
         }
     }

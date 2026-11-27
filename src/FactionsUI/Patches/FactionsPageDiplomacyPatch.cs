@@ -86,16 +86,33 @@ internal static class FactionsPageDiplomacyPatch
         private static void Postfix(MyGuiControlTabPage page)
         {
             FactionsPageReadout.Detach();
-            if (page == null || !DiplomacyComponent.Available) return;
-            try
+            FactionsPageOverview.Detach();
+            if (page == null) return;
+            if (DiplomacyComponent.Available)
             {
-                FactionsPageReadout.Build(page);
+                try
+                {
+                    FactionsPageReadout.Build(page);
+                }
+                catch (Exception ex)
+                {
+                    try { FactionsPageReadout.Remove(page); }
+                    catch { FactionsPageReadout.Detach(); }
+                    LogOnce("diplomacy readout: Factions page build failed, page left vanilla: " + ex);
+                }
             }
-            catch (Exception ex)
+            if (FactionIntelComponent.Available)
             {
-                try { FactionsPageReadout.Remove(page); }
-                catch { FactionsPageReadout.Detach(); }
-                LogOnce("diplomacy readout: Factions page build failed, page left vanilla: " + ex);
+                try
+                {
+                    FactionsPageOverview.Build(page);
+                }
+                catch (Exception ex)
+                {
+                    try { FactionsPageOverview.Remove(page); }
+                    catch { FactionsPageOverview.Detach(); }
+                    LogOnce("factions overview: Factions page build failed, member table left as vanilla: " + ex);
+                }
             }
         }
     }
@@ -114,17 +131,21 @@ internal static class FactionsPageDiplomacyPatch
         // ReSharper disable once UnusedMember.Local
         private static void Postfix(object __instance)
         {
-            if (!FactionsPageReadout.Attached || __instance == null) return;
+            if ((!FactionsPageReadout.Attached && !FactionsPageOverview.Attached) || __instance == null) return;
             try
             {
                 var selected = _selectedFaction.GetValue(__instance) as IMyFaction;
                 var user = _userFaction.GetValue(__instance) as IMyFaction;
                 FactionsPageReadout.OnSelection(selected, user);
+                FactionsPageOverview.OnSelection(selected);
             }
             catch (Exception ex)
             {
-                // Hide rather than show a stance for a faction that may not be the selected one.
+                // Hide rather than show a stance or an estimate for a faction that may not be the
+                // selected one.
                 try { FactionsPageReadout.OnSelection(null, null); }
+                catch { }
+                try { FactionsPageOverview.OnSelection(null); }
                 catch { }
                 LogOnce("diplomacy readout: selection hook failed: " + ex);
             }

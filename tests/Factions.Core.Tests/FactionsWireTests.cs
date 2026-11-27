@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Factions.Core;
 using Factions.Wire;
 using Xunit;
 
@@ -107,7 +108,7 @@ namespace Factions.Core.Tests
                                   Relation = (byte)WireRelation.Enemy,
                                   Moving = true,
                                   VelXKmPerMin = 1.5, VelYKmPerMin = -2.5, VelZKmPerMin = 0.25,
-                                  TargetXKm = 100, TargetYKm = 200, TargetZKm = 300 },
+                                  HasTarget = true, TargetXKm = 100, TargetYKm = 200, TargetZKm = 300 },
                 new WireContact { Key = "node:a", Kind = 0, Label = "Station",
                                   XKm = -1, YKm = -2, ZKm = -3, EntityId = 42L, Unclaimed = true,
                                   Relation = (byte)WireRelation.Own },
@@ -155,7 +156,7 @@ namespace Factions.Core.Tests
                                   Relation = (byte)WireRelation.Enemy,
                                   Moving = true,
                                   VelXKmPerMin = 1.5, VelYKmPerMin = -2.5, VelZKmPerMin = 0.25,
-                                  TargetXKm = 100, TargetYKm = 200, TargetZKm = 300,
+                                  HasTarget = true, TargetXKm = 100, TargetYKm = 200, TargetZKm = 300,
                                   FleetKind = 8, ConvoySize = 12 },
                 // RaidEngagement: parked, so its fleet block follows NO motion block.
                 new WireContact { Key = "fleet:f2", Kind = FactionsWire.ContactKindRaidEngagement,
@@ -470,6 +471,8 @@ namespace Factions.Core.Tests
             var fleet = new WireMapFleet
             {
                 Key = "fleet:abc123",
+                Tier = (byte)WireIntelTier.Full,
+                HasFlightPlan = true,
                 Kind = 21,
                 OwnerTag = "AWL",
                 Relation = (byte)WireRelation.Own,
@@ -494,6 +497,8 @@ namespace Factions.Core.Tests
 
             WireMapFleet got = Assert.Single(fleets);
             Assert.Equal(fleet.Key, got.Key);
+            Assert.Equal(fleet.Tier, got.Tier);
+            Assert.True(got.HasFlightPlan);
             Assert.Equal(fleet.Kind, got.Kind);
             Assert.Equal(fleet.OwnerTag, got.OwnerTag);
             Assert.Equal(fleet.Relation, got.Relation);
@@ -521,7 +526,7 @@ namespace Factions.Core.Tests
         {
             // Guard and Ferry are one-way and carry no remaining stops; a null array must survive
             // as an empty one rather than tripping the reader.
-            var fleet = new WireMapFleet { Key = "fleet:oneway", RoutedStops = null };
+            var fleet = new WireMapFleet { Key = "fleet:oneway", HasFlightPlan = true, RoutedStops = null };
 
             byte[] data = FactionsWire.WriteMapFleets(new List<WireMapFleet> { fleet }, null);
 
@@ -529,6 +534,79 @@ namespace Factions.Core.Tests
             List<WireMapAlarm> alarms;
             Assert.True(FactionsWire.TryReadMapFleets(data, out fleets, out alarms));
             Assert.Empty(Assert.Single(fleets).RoutedStops);
+        }
+
+        [Fact]
+        public void MapFleets_AWithheldFlightPlanSendsNoTargetAndDoesNotDesyncTheNextFleet()
+        {
+            // The flight-plan block is conditional, so the fleet after an unplanned one is the
+            // assertion that proves the framing.
+            var silent = new WireMapFleet
+            {
+                Key = "fleet:silent", Tier = (byte)WireIntelTier.Contact, HasFlightPlan = false,
+                XKm = 1, YKm = 2, ZKm = 3, VelXKmPerMin = 4,
+                // Set but not offered: must not cross the wire.
+                TargetXKm = 900, EtaUtcTicks = 638000000000000000L,
+                RoutedStops = new[] { new WireMapStop { XKm = 5 } },
+            };
+            var own = new WireMapFleet
+            {
+                Key = "fleet:own", Tier = (byte)WireIntelTier.Full, HasFlightPlan = true, Kind = 21,
+                OwnerTag = "AWL", TargetXKm = 7, EtaUtcTicks = 42L,
+                RoutedStops = new[] { new WireMapStop { XKm = 8, Kind = 1 } },
+            };
+
+            byte[] data = FactionsWire.WriteMapFleets(new List<WireMapFleet> { silent, own }, null);
+
+            List<WireMapFleet> fleets;
+            List<WireMapAlarm> alarms;
+            Assert.True(FactionsWire.TryReadMapFleets(data, out fleets, out alarms));
+            Assert.Equal(2, fleets.Count);
+            Assert.False(fleets[0].HasFlightPlan);
+            Assert.Equal((byte)WireIntelTier.Contact, fleets[0].Tier);
+            Assert.Equal(0.0, fleets[0].TargetXKm);
+            Assert.Equal(0L, fleets[0].EtaUtcTicks);
+            Assert.Empty(fleets[0].RoutedStops);
+            Assert.Equal(4.0, fleets[0].VelXKmPerMin);
+            Assert.Equal("fleet:own", fleets[1].Key);
+            Assert.Equal("AWL", fleets[1].OwnerTag);
+            Assert.Equal(7.0, fleets[1].TargetXKm);
+            Assert.Equal(42L, fleets[1].EtaUtcTicks);
+            Assert.Equal(8.0, Assert.Single(fleets[1].RoutedStops).XKm);
+        }
+
+        [Fact]
+        public void ScannerContacts_AWithheldTargetIsNotSentAndDoesNotDesyncTheNextContact()
+        {
+            var present = new List<WireContact>
+            {
+                new WireContact { Key = "fleet:f1", Kind = FactionsWire.ContactKindFleet, Label = "Fleet",
+                                  Tier = (byte)WireIntelTier.Contact, Moving = true, VelXKmPerMin = 3,
+                                  HasTarget = false, TargetXKm = 100 },
+                new WireContact { Key = "node:a", Kind = 0, Label = "Station", XKm = -1,
+                                  Tier = (byte)WireIntelTier.Identity, DisplayName = "Broadmoor" },
+            };
+            byte[] data = FactionsWire.WriteScannerContacts(present, new List<string>(), false);
+
+            List<WireContact> read;
+            List<string> removed;
+            bool reset;
+            Assert.True(FactionsWire.TryReadScannerContacts(data, out read, out removed, out reset));
+            Assert.Equal(2, read.Count);
+            Assert.False(read[0].HasTarget);
+            Assert.Equal(0.0, read[0].TargetXKm);
+            Assert.Equal(3.0, read[0].VelXKmPerMin);
+            Assert.Equal((byte)WireIntelTier.Contact, read[0].Tier);
+            Assert.Equal("Broadmoor", read[1].DisplayName);
+            Assert.Equal((byte)WireIntelTier.Identity, read[1].Tier);
+        }
+
+        [Fact]
+        public void WireIntelTier_MirrorsCoreIntelTierByOrdinal()
+        {
+            foreach (IntelTier t in Enum.GetValues(typeof(IntelTier)))
+                Assert.Equal(t.ToString(), ((WireIntelTier)(byte)t).ToString());
+            Assert.Equal(Enum.GetValues(typeof(IntelTier)).Length, Enum.GetValues(typeof(WireIntelTier)).Length);
         }
 
         [Fact]
@@ -2292,7 +2370,15 @@ namespace Factions.Core.Tests
             // reads the air hours as the survey confidence and everything after it one double late.
             //   59 appends the all-stations fields to every standing-order row (FAC-499). A 58 client
             // reads the next row's id from the AllStations byte.
-            Assert.Equal(59, FactionsWire.ProtocolVersion);
+            //   60 adds the intel tier to scanner contacts and map fleets, and makes a destination
+            // conditional on being offered (FAC-528). A 59 client reads the tier as the moving flag.
+            //   61 adds the intel tier to map nodes and node detail, and the stage to map nodes
+            // (FAC-529). A 60 client reads the next node's id length from the tier byte.
+            //   62 adds the scanned defence band to map nodes and node detail, and its age to node
+            // detail (FAC-531).
+            //   64 adds the grid flag, label and name to every map fleet row (FAC-533). A 63 client
+            // reads the flag as the flight-plan byte.
+            Assert.Equal(64, FactionsWire.ProtocolVersion);
         }
 
         /// <summary>FAC-376: a campaign row carries what came back from its last attempt. Two rows,

@@ -24,6 +24,10 @@ namespace Factions
     /// the time the postfix runs, and crediting the ledger by the same amount leaves the mirror
     /// computing a zero delta on its next pass. The two accounts converge instead of chasing.</para>
     ///
+    /// <para>A withdrawal is booked through <see cref="WorldModel.BookMemberWithdrawal"/>, not as a
+    /// spend: the money stays with the faction's own people, where the central bank's grant rule reads
+    /// it back through <see cref="IMemberWealth"/>, and it must not read as burn.</para>
+    ///
     /// <para><c>Transfer_Internal</c> rather than the two RPC entry points: it is the only place that
     /// reports whether the transfer actually happened (SE validates online-ness, faction membership,
     /// and sufficient funds inside it, returning false on each), and it carries both identifiers and
@@ -82,7 +86,7 @@ namespace Factions
             string from = TagFor(fromIdentifier);
             if (from != null)
             {
-                world.Spend(from, amount);
+                world.BookMemberWithdrawal(from, amount);
                 Log.Info("Faction ledger debited " + amount + " for " + from + " (terminal withdrawal)");
             }
 

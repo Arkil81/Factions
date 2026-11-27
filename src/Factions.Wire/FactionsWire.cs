@@ -650,6 +650,15 @@ namespace Factions.Wire
         /// not empty, so a client can drop a panel the server stopped refreshing. Countdowns travel as
         /// seconds left at send time and are counted down by the client.</summary>
         StatusPanel = 264,
+
+        // ---- Faction intel. Only meaningful once WireFeatures.FactionIntel is granted. ----
+
+        /// <summary>Client -> server. The viewer's estimate of one faction, for the Factions page's
+        /// Overview tab; sent when a faction is selected there and again while it stays selected.</summary>
+        FactionIntelRequest = 265,
+
+        /// <summary>Server -> client. One <see cref="WireFactionIntel"/>, the answer to a request.</summary>
+        FactionIntelSnapshot = 266,
     }
 
     /// <summary>Which side of the server's two relation thresholds a stance sits on. Resolved
@@ -1110,6 +1119,10 @@ namespace Factions.Wire
         /// moved <see cref="FactionsWire.ProtocolVersion"/>: an older client granted it would show
         /// nothing at all.</summary>
         StatusPanel = 1L << 30,
+        /// <summary>The Factions page's Overview tab: word-band estimates of a faction built from the
+        /// viewer's own intel (FAC-532). Read-only; relayable, since it names a faction and touches no
+        /// entity in the caller's sector.</summary>
+        FactionIntel = 1L << 31,
     }
 
     /// <summary>How a contact's owner stands towards the viewing player. Resolved server-side:
@@ -1128,6 +1141,18 @@ namespace Factions.Wire
         /// byte, so no <see cref="FactionsWire.ProtocolVersion"/> move: a client older than it draws
         /// it in its fallback grey.</summary>
         Friendly = 4,
+    }
+
+    /// <summary>How much the viewer has learned about a contact. Mirrors Core's <c>IntelTier</c> by
+    /// ordinal, so neither may be renumbered.</summary>
+    public enum WireIntelTier : byte
+    {
+        None = 0,
+        Contact = 1,
+        Class = 2,
+        Identity = 3,
+        Armament = 4,
+        Full = 5,
     }
 
     /// <summary>One scanner contact as it crosses the wire. Mirrors the server-side
@@ -1153,6 +1178,9 @@ namespace Factions.Wire
         /// <summary>Matches <see cref="WireRelation"/>. Drives the marker colour; the icon carries
         /// the kind, so the two axes stay independent.</summary>
         public byte Relation;
+        /// <summary>What the viewer has learned about this contact: a <see cref="WireIntelTier"/>.
+        /// The server has already withheld every field above it.</summary>
+        public byte Tier;
         /// <summary>Whether this contact moves. False for everything anchored to the ground, and
         /// the three vector fields below are then absent from the wire rather than sent as
         /// zeroes -- a scanner sphere is mostly nodes, and they pay nothing for this.</summary>
@@ -1163,8 +1191,12 @@ namespace Factions.Wire
         public double VelXKmPerMin;
         public double VelYKmPerMin;
         public double VelZKmPerMin;
+        /// <summary>Whether the target below was sent. A destination is offered, never observed: a
+        /// fleet's owner tells its own faction and its friends, and everyone else dead-reckons on
+        /// velocity alone until the next pass corrects it.</summary>
+        public bool HasTarget;
         /// <summary>Where this contact is heading, so dead reckoning can be clamped there instead
-        /// of sailing past it. Zero unless <see cref="Moving"/>.</summary>
+        /// of sailing past it. Zero unless <see cref="Moving"/> and <see cref="HasTarget"/>.</summary>
         public double TargetXKm;
         public double TargetYKm;
         public double TargetZKm;
@@ -1223,6 +1255,83 @@ namespace Factions.Wire
         /// <summary>Matches <see cref="WireKnowledge"/>. A node the viewer does not know is never
         /// sent at all, so this only ever distinguishes remembered from currently-detected.</summary>
         public byte Knowledge;
+        /// <summary>A <see cref="WireIntelTier"/>: the best the viewer has read this node at. Below
+        /// Identity the server sends no name, owner, relation, capabilities or hold; below Class no
+        /// ore, zone, station flag or stage.</summary>
+        public byte Tier;
+        /// <summary>A <see cref="WireNodeStage"/>, as observed at that reading.</summary>
+        public byte Stage;
+        /// <summary>A <see cref="WireDefenceBand"/>: the band at the viewer's last reading at Armament
+        /// or better, live for their own estate; Unknown when never read.</summary>
+        public byte Defence;
+    }
+
+    /// <summary>A node's defence as scanned. Mirrors Core's DefenceBand by ordinal; pips are the
+    /// band less one, and Unknown draws none.</summary>
+    public enum WireDefenceBand : byte
+    {
+        Unknown = 0,
+        Undefended = 1,
+        Light = 2,
+        Contested = 3,
+        Fortress = 4,
+    }
+
+    /// <summary>Estimated wealth on the Factions page. Mirrors Core's WealthBand by ordinal.</summary>
+    public enum WireWealthBand : byte
+    {
+        Unknown = 0,
+        Poor = 1,
+        Modest = 2,
+        Comfortable = 3,
+        Prosperous = 4,
+        Rich = 5,
+    }
+
+    /// <summary>Estimated fleet strength on the Factions page. Mirrors Core's StrengthBand by ordinal.</summary>
+    public enum WireStrengthBand : byte
+    {
+        Unknown = 0,
+        Negligible = 1,
+        Light = 2,
+        Moderate = 3,
+        Strong = 4,
+        Overwhelming = 5,
+    }
+
+    /// <summary>
+    /// What the viewer believes about one faction (docs/fog-of-war.md → The Factions page). Word
+    /// bands for everyone; the exact section only for the viewer's own faction or an admin, and the
+    /// treasury only for an admin. The writer omits the exact section when <see cref="Exact"/> is false,
+    /// so a foreign faction's figures never reach the wire.
+    /// </summary>
+    public struct WireFactionIntel
+    {
+        public string Tag;
+        /// <summary>False when the server has no such faction, or the viewer knows nothing of it.</summary>
+        public bool Known;
+        public int KnownNodes;
+        public byte Wealth;
+        public byte Strength;
+        /// <summary>Age of the newest reading behind <see cref="Strength"/>; 0 when live or unknown.</summary>
+        public int StrengthAgeSeconds;
+        public bool Exact;
+        public long Ledger;
+        public long StrengthDps;
+        public bool HasTreasury;
+        public long Treasury;
+    }
+
+    /// <summary>How developed a node looks: the map icon's ladder. Mirrors Core's NodeStage by
+    /// ordinal.</summary>
+    public enum WireNodeStage : byte
+    {
+        None = 0,
+        Field = 1,
+        Outpost = 2,
+        Settlement = 3,
+        Hub = 4,
+        Capital = 5,
     }
 
     /// <summary>What the client is asking the Expand feature to do. Subscribe and commit share one
@@ -1324,6 +1433,10 @@ namespace Factions.Wire
     public struct WireMapFleet
     {
         public string Key;
+        /// <summary>What the viewer has learned about this fleet: a <see cref="WireIntelTier"/>.
+        /// Below Class, <see cref="Kind"/> and <see cref="ConvoySize"/> are zero; below Identity,
+        /// <see cref="OwnerTag"/> is empty and <see cref="Relation"/> is Unknown.</summary>
+        public byte Tier;
         /// <summary>Matches the server's <c>ActionKind</c> ordinal.</summary>
         public byte Kind;
         public string OwnerTag;
@@ -1335,6 +1448,9 @@ namespace Factions.Wire
         public double VelXKmPerMin;
         public double VelYKmPerMin;
         public double VelZKmPerMin;
+        /// <summary>Whether target, ETA and routed stops were sent. They are offered, never
+        /// observed: own and friendly fleets share them, and no sensor reads another's intent.</summary>
+        public bool HasFlightPlan;
         public double TargetXKm;
         public double TargetYKm;
         public double TargetZKm;
@@ -1349,6 +1465,14 @@ namespace Factions.Wire
         /// routed yet are deliberately absent: they have no waypoints, so the only line drawable
         /// for them is a straight one through whatever body lies between.</summary>
         public WireMapStop[] RoutedStops;
+        /// <summary>A grid the sim does not own rather than a fleet (FAC-533). <see cref="Kind"/> is
+        /// then zero and there is never a flight plan; <see cref="Label"/> and <see cref="Name"/> say
+        /// what the viewer's tier shows.</summary>
+        public bool IsGrid;
+        /// <summary>Server-composed text for a grid at the viewer's tier; empty for a fleet.</summary>
+        public string Label;
+        /// <summary>The grid's own name at Identity and above; empty otherwise and for a fleet.</summary>
+        public string Name;
     }
 
     /// <summary>
@@ -1821,6 +1945,13 @@ namespace Factions.Wire
         public bool Exists;
 
         public string Id;
+        /// <summary>A <see cref="WireIntelTier"/>, the same grade the map draws this node at.</summary>
+        public byte Tier;
+        /// <summary>A <see cref="WireDefenceBand"/>, as on the map.</summary>
+        public byte Defence;
+        /// <summary>How old that defence reading is, in seconds; 0 when it is live (own estate) or
+        /// unknown.</summary>
+        public int DefenceAgeSeconds;
         public string DisplayName;
         /// <summary>The bare subtype of the ore that dominates this node's deposit ("Iron", "Ice",
         /// "Platinum"), or empty when the node has no ore under it. Replaces the retired
@@ -2688,7 +2819,7 @@ namespace Factions.Wire
 
         /// <summary>Bumped on any breaking change to the payload shapes. A client whose version the
         /// server does not recognise is refused and left on the server-only path.</summary>
-        public const int ProtocolVersion = 59;  // 59: a Stock order can cover every station; 58: node detail splits worker supply into food hours and air hours; 57: occupation hails (traffic events 13, 14); 56: traffic callouts carry the speaker, and trespass hails are callouts; 55: node detail no longer carries the Found bar
+        public const int ProtocolVersion = 64;  // 64: grid contacts (scanner kind 9, map fleets flagged IsGrid with a label and name); 63: faction intel request and snapshot (the Factions page Overview); 62: map nodes and node detail carry the scanned defence band, and node detail its age; 61: map nodes and node detail carry an intel tier, and map nodes a stage; 60: contacts and map fleets carry an intel tier, and a destination only when offered; 59: a Stock order can cover every station; 58: node detail splits worker supply into food hours and air hours; 57: occupation hails (traffic events 13, 14); 56: traffic callouts carry the speaker, and trespass hails are callouts; 55: node detail no longer carries the Found bar
 
         /// <summary><c>ScannerContactKind.Fleet</c>. Named here because the contact codec branches
         /// on it; see <see cref="ContactCarriesFleetFields"/>.</summary>
@@ -2697,6 +2828,11 @@ namespace Factions.Wire
         /// <summary><c>ScannerContactKind.RaidEngagement</c> — a fleet holding at its target and
         /// fighting. Still a fleet, so it carries the fleet fields.</summary>
         public const byte ContactKindRaidEngagement = 8;
+
+        /// <summary><c>ScannerContactKind.Grid</c>: a grid the sim does not own. Not a fleet: it
+        /// carries a name in <see cref="WireContact.DisplayName"/>, and its label is composed by the
+        /// server for the viewer's tier.</summary>
+        public const byte ContactKindGrid = 9;
 
         /// <summary>
         /// Whether a contact of this kind carries <see cref="WireContact.FleetKind"/> and
@@ -3108,6 +3244,7 @@ namespace Factions.Wire
                 WriteHeader(w, WireMessageKind.ScannerContacts);
                 w.Write(reset);
                 int presentCount = present == null ? 0 : present.Count;
+                if (presentCount > MaxContactsPerMessage) presentCount = MaxContactsPerMessage;
                 w.Write(presentCount);
                 for (int i = 0; i < presentCount; i++)
                 {
@@ -3121,15 +3258,20 @@ namespace Factions.Wire
                     w.Write(c.EntityId);
                     w.Write(c.Unclaimed);
                     w.Write(c.Relation);
+                    w.Write(c.Tier);
                     w.Write(c.Moving);
                     if (c.Moving)
                     {
                         w.Write(c.VelXKmPerMin);
                         w.Write(c.VelYKmPerMin);
                         w.Write(c.VelZKmPerMin);
-                        w.Write(c.TargetXKm);
-                        w.Write(c.TargetYKm);
-                        w.Write(c.TargetZKm);
+                        w.Write(c.HasTarget);
+                        if (c.HasTarget)
+                        {
+                            w.Write(c.TargetXKm);
+                            w.Write(c.TargetYKm);
+                            w.Write(c.TargetZKm);
+                        }
                     }
                     if (ContactCarriesFleetFields(c.Kind))
                     {
@@ -3178,15 +3320,20 @@ namespace Factions.Wire
                         c.EntityId = r.ReadInt64();
                         c.Unclaimed = r.ReadBoolean();
                         c.Relation = r.ReadByte();
+                        c.Tier = r.ReadByte();
                         c.Moving = r.ReadBoolean();
                         if (c.Moving)
                         {
                             c.VelXKmPerMin = r.ReadDouble();
                             c.VelYKmPerMin = r.ReadDouble();
                             c.VelZKmPerMin = r.ReadDouble();
-                            c.TargetXKm = r.ReadDouble();
-                            c.TargetYKm = r.ReadDouble();
-                            c.TargetZKm = r.ReadDouble();
+                            c.HasTarget = r.ReadBoolean();
+                            if (c.HasTarget)
+                            {
+                                c.TargetXKm = r.ReadDouble();
+                                c.TargetYKm = r.ReadDouble();
+                                c.TargetZKm = r.ReadDouble();
+                            }
                         }
                         if (ContactCarriesFleetFields(c.Kind))
                         {
@@ -3275,6 +3422,9 @@ namespace Factions.Wire
                     w.Write(n.RadiusKm);
                     w.Write(n.HoldStrength);
                     w.Write(n.Knowledge);
+                    w.Write(n.Tier);
+                    w.Write(n.Stage);
+                    w.Write(n.Defence);
                 }
                 int factionCount = factions == null ? 0 : factions.Count;
                 w.Write(factionCount);
@@ -3324,6 +3474,9 @@ namespace Factions.Wire
                         n.RadiusKm = r.ReadDouble();
                         n.HoldStrength = r.ReadDouble();
                         n.Knowledge = r.ReadByte();
+                        n.Tier = r.ReadByte();
+                        n.Stage = r.ReadByte();
+                        n.Defence = r.ReadByte();
                         readNodes.Add(n);
                     }
 
@@ -3358,11 +3511,13 @@ namespace Factions.Wire
             {
                 WriteHeader(w, WireMessageKind.MapFleets);
                 int fleetCount = fleets == null ? 0 : fleets.Count;
+                if (fleetCount > MaxFleetsPerMessage) fleetCount = MaxFleetsPerMessage;
                 w.Write(fleetCount);
                 for (int i = 0; i < fleetCount; i++)
                 {
                     WireMapFleet f = fleets[i];
                     w.Write(f.Key ?? "");
+                    w.Write(f.Tier);
                     w.Write(f.Kind);
                     w.Write(f.OwnerTag ?? "");
                     w.Write(f.Relation);
@@ -3372,13 +3527,21 @@ namespace Factions.Wire
                     w.Write(f.VelXKmPerMin);
                     w.Write(f.VelYKmPerMin);
                     w.Write(f.VelZKmPerMin);
+                    w.Write(f.ConvoySize);
+                    w.Write(f.EntityId);
+                    w.Write(f.IsGrid);
+                    if (f.IsGrid)
+                    {
+                        w.Write(f.Label ?? "");
+                        w.Write(f.Name ?? "");
+                    }
+                    w.Write(f.HasFlightPlan);
+                    if (!f.HasFlightPlan) continue;
+
                     w.Write(f.TargetXKm);
                     w.Write(f.TargetYKm);
                     w.Write(f.TargetZKm);
                     w.Write(f.EtaUtcTicks);
-                    w.Write(f.ConvoySize);
-                    w.Write(f.EntityId);
-
                     int stopCount = f.RoutedStops == null ? 0 : f.RoutedStops.Length;
                     if (stopCount > MaxStopsPerFleet) stopCount = MaxStopsPerFleet;
                     w.Write(stopCount);
@@ -3428,6 +3591,7 @@ namespace Factions.Wire
                     {
                         var f = new WireMapFleet();
                         f.Key = r.ReadString();
+                        f.Tier = r.ReadByte();
                         f.Kind = r.ReadByte();
                         f.OwnerTag = r.ReadString();
                         f.Relation = r.ReadByte();
@@ -3437,13 +3601,26 @@ namespace Factions.Wire
                         f.VelXKmPerMin = r.ReadDouble();
                         f.VelYKmPerMin = r.ReadDouble();
                         f.VelZKmPerMin = r.ReadDouble();
+                        f.ConvoySize = r.ReadInt32();
+                        f.EntityId = r.ReadInt64();
+                        f.IsGrid = r.ReadBoolean();
+                        if (f.IsGrid)
+                        {
+                            f.Label = r.ReadString();
+                            f.Name = r.ReadString();
+                        }
+                        f.HasFlightPlan = r.ReadBoolean();
+                        if (!f.HasFlightPlan)
+                        {
+                            f.RoutedStops = new WireMapStop[0];
+                            readFleets.Add(f);
+                            continue;
+                        }
+
                         f.TargetXKm = r.ReadDouble();
                         f.TargetYKm = r.ReadDouble();
                         f.TargetZKm = r.ReadDouble();
                         f.EtaUtcTicks = r.ReadInt64();
-                        f.ConvoySize = r.ReadInt32();
-                        f.EntityId = r.ReadInt64();
-
                         int stopCount = r.ReadInt32();
                         if (stopCount < 0 || stopCount > MaxStopsPerFleet) return false;
                         var stops = new WireMapStop[stopCount];
@@ -3717,6 +3894,94 @@ namespace Factions.Wire
         /// <summary>Watch one node, or stop watching. An empty or null
         /// <paramref name="nodeId"/> is the unsubscribe — there is no separate verb, because a
         /// client only ever watches one node and "watch nothing" is the same statement.</summary>
+        public static byte[] WriteFactionIntelRequest(string tag)
+        {
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                WriteHeader(w, WireMessageKind.FactionIntelRequest);
+                w.Write(tag ?? "");
+                return ms.ToArray();
+            }
+        }
+
+        public static bool TryReadFactionIntelRequest(byte[] data, out string tag)
+        {
+            tag = null;
+            try
+            {
+                using (var ms = new MemoryStream(data))
+                using (var r = new BinaryReader(ms, Encoding.UTF8))
+                {
+                    WireMessageKind kind;
+                    if (!ReadHeader(r, out kind) || kind != WireMessageKind.FactionIntelRequest) return false;
+                    string read = r.ReadString();
+                    if (read.Length > MaxCommandTokenLength) return false;
+                    tag = read;
+                    return true;
+                }
+            }
+            catch { return false; }
+        }
+
+        /// <summary>The exact section is written only when <see cref="WireFactionIntel.Exact"/>, and the
+        /// treasury only when <see cref="WireFactionIntel.HasTreasury"/>: the privacy rule is the writer's.</summary>
+        public static byte[] WriteFactionIntelSnapshot(WireFactionIntel f)
+        {
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms, Encoding.UTF8))
+            {
+                WriteHeader(w, WireMessageKind.FactionIntelSnapshot);
+                w.Write(f.Tag ?? "");
+                w.Write(f.Known);
+                w.Write(f.KnownNodes);
+                w.Write(f.Wealth);
+                w.Write(f.Strength);
+                w.Write(f.StrengthAgeSeconds);
+                w.Write(f.Exact);
+                if (f.Exact)
+                {
+                    w.Write(f.Ledger);
+                    w.Write(f.StrengthDps);
+                    w.Write(f.HasTreasury);
+                    if (f.HasTreasury) w.Write(f.Treasury);
+                }
+                return ms.ToArray();
+            }
+        }
+
+        public static bool TryReadFactionIntelSnapshot(byte[] data, out WireFactionIntel f)
+        {
+            f = default(WireFactionIntel);
+            try
+            {
+                using (var ms = new MemoryStream(data))
+                using (var r = new BinaryReader(ms, Encoding.UTF8))
+                {
+                    WireMessageKind kind;
+                    if (!ReadHeader(r, out kind) || kind != WireMessageKind.FactionIntelSnapshot) return false;
+                    var x = new WireFactionIntel();
+                    x.Tag = r.ReadString();
+                    x.Known = r.ReadBoolean();
+                    x.KnownNodes = r.ReadInt32();
+                    x.Wealth = r.ReadByte();
+                    x.Strength = r.ReadByte();
+                    x.StrengthAgeSeconds = r.ReadInt32();
+                    x.Exact = r.ReadBoolean();
+                    if (x.Exact)
+                    {
+                        x.Ledger = r.ReadInt64();
+                        x.StrengthDps = r.ReadInt64();
+                        x.HasTreasury = r.ReadBoolean();
+                        if (x.HasTreasury) x.Treasury = r.ReadInt64();
+                    }
+                    f = x;
+                    return true;
+                }
+            }
+            catch { return false; }
+        }
+
         public static byte[] WriteNodeDetailRequest(string nodeId)
         {
             using (var ms = new MemoryStream())
@@ -3764,6 +4029,9 @@ namespace Factions.Wire
                 WriteHeader(w, WireMessageKind.NodeDetailSnapshot);
                 w.Write(detail.Exists);
                 w.Write(detail.Id ?? "");
+                w.Write(detail.Tier);
+                w.Write(detail.Defence);
+                w.Write(detail.DefenceAgeSeconds);
                 w.Write(detail.DisplayName ?? "");
                 w.Write(detail.DominantOre ?? "");
                 w.Write(detail.Surveyed);
@@ -4015,6 +4283,9 @@ namespace Factions.Wire
                     var read = new WireNodeDetail();
                     read.Exists = r.ReadBoolean();
                     read.Id = r.ReadString();
+                    read.Tier = r.ReadByte();
+                    read.Defence = r.ReadByte();
+                    read.DefenceAgeSeconds = r.ReadInt32();
                     read.DisplayName = r.ReadString();
                     read.DominantOre = r.ReadString();
                     read.Surveyed = r.ReadBoolean();

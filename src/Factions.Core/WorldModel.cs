@@ -562,6 +562,25 @@ namespace Factions.Core
             AddPendingIncome(tag, amount);
         }
 
+        /// <summary>A member's withdrawal from the faction wallet: a transfer to someone who belongs to
+        /// the faction, not a spend. Debits the treasury without a pending expense, so it never reads
+        /// as burn and never lifts the runway term of a central-bank treasury target. Where the money
+        /// went is what <see cref="MemberWealth"/> reports.</summary>
+        public void BookMemberWithdrawal(string tag, long amount)
+        {
+            if (string.IsNullOrEmpty(tag) || amount <= 0) return;
+            AddTreasury(tag, -amount);
+        }
+
+        private IMemberWealth _memberWealth;
+        /// <summary>Members' personal balances, read for player-faction grants. Defaults to
+        /// <see cref="NullMemberWealth"/>; the SE plugin wires a live reader.</summary>
+        public IMemberWealth MemberWealth
+        {
+            get { return _memberWealth ?? (_memberWealth = NullMemberWealth.Instance); }
+            set { _memberWealth = value; }
+        }
+
         private ITreasuryMirror _treasuryMirror;
         /// <summary>Host-visible wallet mirror. Defaults to <see cref="NullTreasuryMirror"/> (offline
         /// sim, dry-run) the first time it is read; the SE plugin wires a live adapter before the
@@ -4165,6 +4184,20 @@ namespace Factions.Core
             long treasury = GetTreasury(factionTag);
             if (treasury >= treasuryTarget) return 0;
 
+            // A player faction's members' own wallets count as its liquidity: what they hold they can
+            // deposit, so the bank grants only the part of the target they cannot cover themselves.
+            long liquidity = treasury;
+            long memberCover = GrantMemberCover(state);
+            if (memberCover > 0)
+            {
+                liquidity = memberCover > long.MaxValue - Math.Max(0L, treasury) ? long.MaxValue : treasury + memberCover;
+                if (liquidity >= treasuryTarget)
+                {
+                    denialReason = "Members' own wallets cover the grant target.";
+                    return 0;
+                }
+            }
+
             DateTime cooldownUntil = GetCentralBankGrantCooldownUntil(factionTag, state);
             if (cooldownUntil > UtcNow)
             {
@@ -4172,7 +4205,7 @@ namespace Factions.Core
                 return 0;
             }
 
-            long needed = treasuryTarget - treasury;
+            long needed = treasuryTarget - liquidity;
             long collateralCap = (long)Math.Ceiling(collateral * Tuning.CentralBankGrantCollateralFraction);
             if (collateralCap < 1) collateralCap = 1;
             long grantCap = Math.Min(Tuning.CentralBankGrantAmount, collateralCap);
@@ -4183,6 +4216,19 @@ namespace Factions.Core
                 return 0;
             }
             return grant;
+        }
+
+        /// <summary>The share of a player faction's member wealth counted against its grant target. 0 for
+        /// an NPC faction, whose members are crew and agents rather than investors.</summary>
+        private long GrantMemberCover(FactionState state)
+        {
+            if (state == null || !state.IsPlayerFaction) return 0;
+            double fraction = Tuning.CentralBankGrantMemberWealthFraction;
+            if (fraction <= 0) return 0;
+            long wealth = MemberWealth.MemberWealth(state);
+            if (wealth <= 0) return 0;
+            double counted = wealth * fraction;
+            return counted >= long.MaxValue ? long.MaxValue : (long)counted;
         }
 
         private long ComputeCentralBankSupportLoan(string factionTag, FactionState state, long ledger, long debt,

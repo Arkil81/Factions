@@ -128,6 +128,7 @@ public class Plugin : IPlugin, IHandleInputPlugin
             try
             {
                 Diplomacy.FactionsPageReadout.Tick(terminalOpen);
+                Diplomacy.FactionsPageOverview.Tick(terminalOpen);
             }
             catch (Exception ex)
             {
