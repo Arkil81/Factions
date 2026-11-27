@@ -41,6 +41,10 @@
     <!-- The client radio's per-sample mix. SE-free, and the only place a gain that steps instead of
          gliding - heard in game as a pop when an antenna turns or a squelch moves - can be measured. -->
     <Compile Include="..\..\src\FactionsUI\Atc\AtcMixer.cs" LinkBase="FactionsUI" />
+    <!-- The client's rebuild of Real Gas Giants' render entities after a seamless switch. SE-free; the
+         half whose failure - RGG's members not resolving, or the sphere not being remade - leaves a
+         gas giant drawn as its voxel core. -->
+    <Compile Include="..\..\src\FactionsUI\GasGiants\RggRenderRebuild.cs" LinkBase="FactionsUI" />
   </ItemGroup>
 
   <ItemGroup>
