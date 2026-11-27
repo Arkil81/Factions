@@ -159,8 +159,30 @@ release on its own. You do not reinstall anything.
 
 Client and server must speak the same wire protocol, and each
 [release](https://github.com/Arkil81/Factions/releases) states which one it uses. Releases are timed
-to match the servers' updates. If a server updates first, restart the game to pick up the new
-client.
+to match the servers' updates. If a server updates first and your game checked for updates less
+than two hours ago, restarting the game is not enough: see the next section.
+
+### Getting a new release straight away
+
+Pulsar keeps the time of its last check, and does not check again until two hours have passed. To
+make it check every time the game starts:
+
+1. Close Space Engineers. Pulsar rewrites its settings while the game runs, so a change made then
+   is lost.
+2. Open the file `Legacy\Sources\sources.xml` in your Pulsar folder, the folder that holds
+   `Legacy.exe`. If your launch options contain `-useHome`, the file is
+   `%AppData%\Pulsar\Legacy\Sources\sources.xml` instead.
+3. Find the line `<MaxSourceAge>2</MaxSourceAge>` and change the `2` to `0`. If the file has no such
+   line, add `<MaxSourceAge>0</MaxSourceAge>` on the line after the one that starts with
+   `<SourcesConfig`.
+4. Save the file and start the game. Pulsar checks for the new release and builds it.
+
+The number is the time in hours between checks. You can leave it at `0`, which costs one short
+check of this repository each time you start the game, or set it back to `2`.
+
+There is also a way that does not need the file. In **Plugins** → **Sources**, remove the Factions
+entry under **Plugins** and click **Apply**, then add it again as in *Install* above and click
+**Apply**. A newly added source has never been checked, so Pulsar checks it at once.
 
 ## Checking that it works
 
@@ -187,8 +209,9 @@ it for `FactionsUI:`.
   "This source already exists in the list." and keeps the old entry. Remove the entry, click
   **Apply**, then add it again with the right file name and click **Apply**.
 - **`UPLINK_REFUSED protocol`.** The client and server are on different releases. Restart the game
-  so Pulsar fetches the current release. If the server is the older one, the client links again once
-  the server updates.
+  so Pulsar fetches the current release. If it still refuses, Pulsar checked less than two hours ago:
+  see [Getting a new release straight away](#getting-a-new-release-straight-away). If the server is
+  the older one, the client links again once the server updates.
 - **Factions UI added as a hub.** Adding the repository under **Hubs** instead of **Plugins** also
   works, but Pulsar then downloads the whole repository each time it changes, instead of one small
   file. Remove the hub entry and add it under **Plugins** instead.

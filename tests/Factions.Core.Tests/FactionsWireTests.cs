@@ -2208,9 +2208,12 @@ namespace Factions.Core.Tests
             }
         }
 
-        [Fact]
-        public void ProtocolVersion_MovedForTheNewMessage()
+        [ReleasedProtocolFact]
+        public void ProtocolVersion_MovesAtMostOnceSinceTheLastRelease()
         {
+            // Compared with origin/main, the released protocol, not pinned: a wire change inside a release
+            // window that has already bumped reuses that number (see ReleasedProtocol). The history below
+            // records what each number changed.
             // A protocol change is anything that moves the wire, in either direction: 12 took a
             // per-node separation away once the map stopped needing one, 13 adds Richness beside
             // ResourceValue on both node messages, 14 adds the scanner contact's motion sample, 15
@@ -2378,7 +2381,7 @@ namespace Factions.Core.Tests
             // detail (FAC-531).
             //   64 adds the grid flag, label and name to every map fleet row (FAC-533). A 63 client
             // reads the flag as the flight-plan byte.
-            Assert.Equal(64, FactionsWire.ProtocolVersion);
+            Assert.Null(ReleasedProtocol.Verdict(ReleasedProtocol.Released.Value, FactionsWire.ProtocolVersion));
         }
 
         /// <summary>FAC-376: a campaign row carries what came back from its last attempt. Two rows,
