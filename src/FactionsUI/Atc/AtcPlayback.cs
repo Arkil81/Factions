@@ -169,7 +169,7 @@ internal sealed class AtcControllerLine : AtcStreamedLine
     {
         // The static under the voice is the signal-to-noise on the approved ladder; the squelch of the
         // antenna that hears it best opens and closes the line.
-        float noiseTarget = r.SnrDb >= AtcRadio.CleanDb ? 0f : (float)Math.Pow(10, -r.SnrDb / 20);
+        float noiseTarget = AtcMixer.ControllerNoise(r.SnrDb, AtcRadio.CleanDb, AtcRadio.EdgeDb);
         return AtcMixer.Controller(_speech, _noise, _fade, from, count, noiseTarget, r.Share >= 0.8,
                                    r.SnrDb - r.SquelchDb, master, _gains);
     }

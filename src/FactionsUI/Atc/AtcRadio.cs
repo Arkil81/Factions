@@ -139,8 +139,11 @@ internal static class AtcRadio
     /// (<see cref="CleanDb"/>), then 25, 12 and 5 dB; past the reach it is gone.</summary>
     public const double CleanDb = 40;
 
+    /// <summary>The last rung inside reach, dB: the most static a controller line carries.</summary>
+    public const double EdgeDb = 5;
+
     public static double LadderSnrDb(double share) =>
-        share < 0.25 ? CleanDb : share < 0.5 ? 25 : share < 0.8 ? 12 : share < 1.0 ? 5 : -100;
+        share < 0.25 ? CleanDb : share < 0.5 ? 25 : share < 0.8 ? 12 : share < 1.0 ? EdgeDb : -100;
 
     /// <summary>A controller line: each antenna's share of its own reach (the omni reach times its gain)
     /// on the ladder, against its squelch. Without an aim (an older server) the share sent is used.</summary>

@@ -85,6 +85,16 @@ internal static class AtcMixer
     /// closed anyway).</summary>
     public const double MaxNoiseOverVoiceDb = 6.0;
 
+    private static readonly float MaxNoiseGain = (float)Math.Pow(10, MaxNoiseOverVoiceDb / 20.0);
+
+    /// <summary>The static under a controller line on the distance ladder: none at
+    /// <paramref name="cleanDb"/> and above, and never louder than the last rung inside reach,
+    /// <paramref name="edgeDb"/>. Past the reach the ladder reads -100 dB, which closes the squelch;
+    /// taken as a level it is a gain of 10^5, heard as a burst of full-scale static as the squelch
+    /// closes and again for over a second after it reopens.</summary>
+    public static float ControllerNoise(double snrDb, double cleanDb, double edgeDb) =>
+        snrDb >= cleanDb ? 0f : (float)Math.Pow(10, -Math.Max(snrDb, edgeDb) / 20.0);
+
     /// <summary>A pilot call, samples [from, from+count): the voice and its static at this
     /// signal-to-noise, the squelch read against the instantaneous fade.</summary>
     public static byte[] Pilot(float[] signal, float[] fadeDb, float[] noise, int from, int count,
@@ -109,6 +119,7 @@ internal static class AtcMixer
     public static byte[] Controller(float[] speech, float[] noise, float[] fadePoints, int from, int count,
                                     float noiseTarget, bool fading, double marginDb, float master, AtcLineGains g)
     {
+        noiseTarget = Math.Min(noiseTarget, MaxNoiseGain);
         var pcm = new byte[count * 2];
         for (int k = 0; k < count; k++)
         {

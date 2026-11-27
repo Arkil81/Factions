@@ -135,6 +135,52 @@ namespace Factions.Core.Tests
             Assert.InRange(outp[n - 1], 0.17f, 0.18f);
         }
 
+        /// <summary>A controller line of pure DC static, mixed chunk by chunk at the ladder SNR each chunk
+        /// names, through <see cref="AtcMixer.ControllerNoise"/> as the playback does.</summary>
+        private static float[] ControllerStatic(float level, params double[] snrs)
+        {
+            int n = snrs.Length * Chunk;
+            float[] speech = new float[n], noise = Dc(n, level), fade = { 1f, 1f };
+            var g = new AtcLineGains(Rate, 0.150);
+            var outp = new float[n];
+            for (int c = 0; c < snrs.Length; c++)
+            {
+                float target = AtcMixer.ControllerNoise(snrs[c], 40, 5);
+                float[] s = Samples(AtcMixer.Controller(speech, noise, fade, c * Chunk, Chunk, target, false, snrs[c], 1f, g));
+                Array.Copy(s, 0, outp, c * Chunk, Chunk);
+            }
+            return outp;
+        }
+
+        private static float MaxAbs(float[] s, int from)
+        {
+            float m = 0;
+            for (int i = from; i < s.Length; i++) m = Math.Max(m, Math.Abs(s[i]));
+            return m;
+        }
+
+        [Fact]
+        public void A_controller_turned_out_of_reach_and_back_never_carries_more_static_than_the_edge()
+        {
+            // 5 dB (the last rung), then past the reach (-100) for 400 ms, then back at 5 dB. -100 is the
+            // ladder's out-of-reach mark, not a level: taken as one, the static ran to x10^5 and clipped.
+            float edge = 0.2f * (float)Math.Pow(10, -5 / 20.0);
+            float[] s = ControllerStatic(0.2f, 5, 5, 5, 5, -100, -100, -100, -100, -100, -100, -100, -100, 5, 5, 5, 5, 5, 5, 5, 5);
+            Assert.True(MaxAbs(s, 0) <= edge * 1.01f, "loudest " + MaxAbs(s, 0) + " against the edge " + edge);
+            Assert.True(MaxJump(s, Chunk) < MaxStep, "largest step " + MaxJump(s, Chunk));
+            Assert.True(s[12 * Chunk - 1] < 0.002f, "closed: " + s[12 * Chunk - 1]);
+            Assert.InRange(s[s.Length - 1], edge * 0.99f, edge * 1.01f);
+        }
+
+        [Fact]
+        public void A_controller_line_never_carries_static_more_than_six_dB_over_the_voice()
+        {
+            int n = 4 * Chunk;
+            var g = new AtcLineGains(Rate, 0.150);
+            float[] s = Samples(AtcMixer.Controller(new float[n], Dc(n, 0.1f), new[] { 1f, 1f }, 0, n, 1e5f, false, 10, 1f, g));
+            Assert.True(MaxAbs(s, 0) <= 0.1f * 2f * 1.01f, "loudest " + MaxAbs(s, 0));
+        }
+
         [Fact]
         public void The_fade_runs_through_its_points_across_the_line()
         {
