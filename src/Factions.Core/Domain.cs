@@ -4894,11 +4894,11 @@ namespace Factions.Core
         public TimeSpan PlayerOfferTtl = TimeSpan.FromHours(24);
 
         // ---- node placement: zone classification + separation enforcement ----------------------
-        // A gravity sample at the candidate position classifies the zone; the per-zone minimum
-        // separation is then checked against all existing nodes. Surface nodes are additionally
-        // snapped to the nearest planet surface sphere via IPlanetCatalogue.
-        public double SurfaceGravityThreshold; // relativeG (g / that planet's own true surface g) >= this classifies position as Surface (default 0.5)
-        public double OrbitGravityMin;         // Orbit snap-band's RELATIVE ceiling (default 0.05) -- any g>0 below the Surface threshold classifies as Orbit; this no longer gates the Orbit/DeepSpace split, it only bounds how tightly Orbit positions get snapped (see WorldModel.SnapToOrbitBand)
+        // Any natural gravity at the candidate position is Surface (the whole well), none is
+        // DeepSpace, and Orbit is authored: a planet's orbit band, or a region like Cauldron's ring
+        // (WorldModel.ClassifyZone, FAC-537). The per-zone minimum separation is then checked
+        // against all existing nodes, and Surface nodes are snapped to the ground.
+        public double OrbitGravityMin;         // RELATIVE gravity (g / that planet's surface g) of the planet-route shell (default 0.05), and of the Orbit snap for a body that forbids surface stations and has no authored region there (WorldModel.SnapToOrbitBand)
         // Minimum dry-hull (no cargo) thrust-to-weight ratio a prefab's Down-facing thrusters must
         // clear, at both origin and destination gravity, to be route-eligible in ShipPool — see
         // ThrustPhysics.DryTwr. WARNING: the C# zero-value (0) disables this gate entirely (DryTwr
@@ -5285,6 +5285,24 @@ namespace Factions.Core
             return schedule.MinsAtKm(coveredKm);
         }
         public double ObservationRadiusKm;       // player proximity radius that triggers MES materialisation
+        /// <summary>Within this distance of a player a fleet spawns whatever holds it back: the load
+        /// governor, the traffic presence budget and the station queue. Under any of those the
+        /// trigger radius shrinks from <see cref="ObservationRadiusKm"/> to this one rather than the
+        /// spawn being refused outright, so a player who closes in still gets the ship. 3 km is the
+        /// sync distance; the spawn also goes to the head of the spawn queue. 0 turns it off.
+        /// (Inline default: a missing JSON key must not zero it; new key, so no TuneVersion bump.)</summary>
+        public double ForceSpawnRadiusKm = 3.0;
+        /// <summary>How far from the nearest player a fleet starts braking (<see cref="ChaseBrake"/>):
+        /// cruise speed here, falling at a constant deceleration to
+        /// <see cref="ChaseBrakeFloorKmPerMin"/> at <see cref="ObservationRadiusKm"/>. 0 turns the brake
+        /// off. (Inline default; new key, so no TuneVersion bump.)</summary>
+        public double ChaseBrakeStartKm = 100.0;
+        /// <summary>The speed a braked fleet holds inside <see cref="ObservationRadiusKm"/>, km/min.
+        /// Below the world's ship limit (30 km/min on production), so a player at full speed closes
+        /// on it even from behind. Its own key because <see cref="FleetSpeedMinKmPerMin"/> is set at
+        /// session load from SE and also caps every leg in gravity. 0 falls back to that.
+        /// (Inline default; new key, so no TuneVersion bump.)</summary>
+        public double ChaseBrakeFloorKmPerMin = 25.0;
         public TimeSpan GuardDuration; // how long a guard actively defends after arrival
 
         // ---- native flight controller (terminal approach) --------------------------------------

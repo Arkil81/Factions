@@ -193,7 +193,7 @@ public class ScannerComponent : MySessionComponentBase
         if (uplink == null || !uplink.HasFeature(WireFeatures.Scanner)) return;
 
         // Names are detail, and SE's gesture for detail is holding Alt; without it a marker draws
-        // only its class remainder and distance. The GPS list is read only while Alt is held.
+        // only its class remainder (a grid: its owner's tag) and distance. The GPS list is read only while Alt is held.
         List<string> gpsTexts = MyInput.Static != null && MyInput.Static.IsAnyAltKeyPressed()
             ? HudGpsTexts()
             : null;
@@ -319,7 +319,11 @@ public class ScannerComponent : MySessionComponentBase
 
         if (string.IsNullOrEmpty(c.Label)) return;
 
-        string text = WithoutClassWord(c.Kind, c.Label);
+        // A grid's label is a sentence (owner, class, blocks, armament); without Alt the marker
+        // keeps only the owner's tag, as a fleet keeps only its phrase.
+        string text = c.Kind == FactionsWire.ContactKindGrid && gpsTexts == null
+            ? ScannerNames.GridOwnerTag(c.Label)
+            : WithoutClassWord(c.Kind, c.Label);
         if (gpsTexts != null && ShowName(c.DisplayName, gpsTexts))
             text = text.Length > 0 ? c.DisplayName + PhraseSeparator + text : c.DisplayName;
         var labelColour = new Color(colour, alpha);

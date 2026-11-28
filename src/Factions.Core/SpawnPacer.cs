@@ -25,6 +25,11 @@ namespace Factions.Core
     /// 40 ms one the plain spacing. Capped at <see cref="MaxGapSeconds"/> so one freak frame cannot
     /// stall every spawn.</para>
     ///
+    /// <para><b>A player's own spawn goes first.</b> <see cref="Prioritise"/> moves a key ahead of
+    /// every ordinary one, behind earlier prioritised keys: a fleet a player has closed on to sync
+    /// distance must land while they are still beside it (FAC-539). It still waits for the spawn in
+    /// flight and for the gap, which protect the frame.</para>
+    ///
     /// <para>Game thread only; not synchronised.</para>
     /// </summary>
     public sealed class SpawnPacer
@@ -45,6 +50,7 @@ namespace Factions.Core
 
         private readonly List<string> _order = new List<string>();
         private readonly Dictionary<string, Waiting> _waiting = new Dictionary<string, Waiting>(StringComparer.Ordinal);
+        private readonly HashSet<string> _priority = new HashSet<string>(StringComparer.Ordinal);
         private string _inFlight;
         private DateTime _inFlightSince;
         private DateTime _lastLanded = DateTime.MinValue;
@@ -59,6 +65,8 @@ namespace Factions.Core
         public double MaxWaitSeconds { get; private set; }
         public int StaleInFlight { get; private set; }
         public int DroppedFromQueue { get; private set; }
+        /// <summary>Keys moved to the front by <see cref="Prioritise"/>.</summary>
+        public int Prioritised { get; private set; }
         /// <summary>The longest gap a landing's cost imposed this window, seconds.</summary>
         public double MaxGapImposedSeconds { get; private set; }
 
@@ -117,6 +125,7 @@ namespace Factions.Core
 
             _order.RemoveAt(0);
             _waiting.Remove(key);
+            _priority.Remove(key);
             _inFlight = key;
             _inFlightSince = now;
             Granted++;
@@ -133,7 +142,27 @@ namespace Factions.Core
             if (string.IsNullOrEmpty(key)) return true;
             if (key == _inFlight) return false;
             if (_waiting.Remove(key)) _order.Remove(key);
+            _priority.Remove(key);
             return true;
+        }
+
+        /// <summary>Puts <paramref name="key"/> ahead of every ordinary waiting key, behind those
+        /// prioritised before it, queueing it if it was not waiting yet. The caller keeps polling
+        /// <see cref="TryBegin"/> as usual. No-op for the spawn already in flight.</summary>
+        public void Prioritise(string key, DateTime now)
+        {
+            if (!Enabled || string.IsNullOrEmpty(key) || key == _inFlight) return;
+            Waiting w;
+            bool waiting = _waiting.TryGetValue(key, out w);
+            if (waiting && _priority.Contains(key)) return;
+            if (waiting) _order.Remove(key);
+            else _waiting[key] = new Waiting { Since = now, LastAsked = now };
+            _priority.Add(key);
+            int at = 0;
+            while (at < _order.Count && _priority.Contains(_order[at])) at++;
+            _order.Insert(at, key);
+            if (_order.Count > MaxQueue) MaxQueue = _order.Count;
+            Prioritised++;
         }
 
         /// <summary>The spawn has landed (or failed): the next may start a spacing from now.</summary>
@@ -176,7 +205,7 @@ namespace Factions.Core
         /// <summary>Returns the window's counters and starts the next window.</summary>
         public void ResetWindow()
         {
-            Granted = Queued = StaleInFlight = DroppedFromQueue = 0;
+            Granted = Queued = StaleInFlight = DroppedFromQueue = Prioritised = 0;
             MaxGapImposedSeconds = 0;
             MaxQueue = _order.Count;
             MaxWaitSeconds = 0;
@@ -192,6 +221,7 @@ namespace Factions.Core
                 if (_waiting.TryGetValue(head, out hw) && (now - hw.LastAsked).TotalSeconds < QueueStaleSeconds) return;
                 _order.RemoveAt(0);
                 _waiting.Remove(head);
+                _priority.Remove(head);
                 DroppedFromQueue++;
             }
         }

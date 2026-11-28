@@ -31,5 +31,29 @@ namespace Factions.Wire
                 && hudText.StartsWith(nodeName + " (", StringComparison.Ordinal)
                 && hudText[hudText.Length - 1] == ')';
         }
+
+        /// <summary>
+        /// What a grid's HUD marker says while Alt is up: its owner's <c>[TAG]</c>, or nothing. The
+        /// server's label (<c>ScannerGrids.Label</c>) puts the owner in front once the tier
+        /// identifies it -- <c>Name [TAG] · Large grid, 612 blocks · armed</c> -- and all of it is
+        /// too much text for a marker; the rest is drawn while Alt is held. Empty for a label with
+        /// no owner segment (below the identity tier), and for an owner with no tag: a factionless
+        /// player, <c>Unowned</c>, <c>Unknown owner</c>.
+        /// </summary>
+        public static string GridOwnerTag(string label)
+        {
+            if (string.IsNullOrEmpty(label)) return "";
+            int cut = label.IndexOf(Separator, StringComparison.Ordinal);
+            if (cut <= 0) return "";
+            string owner = label.Substring(0, cut);
+            if (owner.StartsWith("Large grid", StringComparison.Ordinal)
+                || owner.StartsWith("Small grid", StringComparison.Ordinal)) return "";
+            if (owner[owner.Length - 1] != ']') return "";
+            int open = owner.LastIndexOf('[');
+            return open < 0 || owner.Length - open < 3 ? "" : owner.Substring(open);
+        }
+
+        /// <summary>What <c>ScannerGrids.Label</c> puts between its segments.</summary>
+        private const string Separator = " \u00B7 ";
     }
 }

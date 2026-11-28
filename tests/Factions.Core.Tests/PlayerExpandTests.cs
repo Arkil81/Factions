@@ -70,7 +70,6 @@ namespace Factions.Core.Tests
         {
             return new FactionTuning
             {
-                SurfaceGravityThreshold = 0.5,
                 OrbitGravityMin = 0.01,
                 NodeSeparationSurfaceKm = 15.0,
                 NodeSeparationOrbitKm = 30.0,

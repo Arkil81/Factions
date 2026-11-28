@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
@@ -32,6 +33,8 @@ namespace Factions.Core
         public string Name;
         /// <summary>Summed weapon DPS across the group. Server only.</summary>
         public double WeaponDps;
+        /// <summary>Reported by a Nexus agent: the grid stands on another shard.</summary>
+        public bool Remote;
     }
 
     /// <summary>The grid half of the scanner: detection, and what each tier of it shows.</summary>
@@ -136,6 +139,77 @@ namespace Factions.Core
             string tag = string.IsNullOrEmpty(ownerTag) ? null : "[" + ownerTag + "]";
             if (string.IsNullOrEmpty(ownerName)) return tag ?? "Unknown owner";
             return tag == null ? ownerName : ownerName + " " + tag;
+        }
+
+        /// <summary>A candidate's owner class for the bridge census: a human owner carries a name
+        /// (<see cref="ScannerGridCandidate.OwnerName"/> is null for an NPC).</summary>
+        public static string OwnerClass(ScannerGridCandidate g)
+        {
+            if (g.OwnerIdentityId == 0) return "unowned";
+            return string.IsNullOrEmpty(g.OwnerName) ? "npc" : "player";
+        }
+
+        /// <summary>
+        /// The candidate set as <c>factions scanner grids</c> prints it: a census by owner class,
+        /// then one line per grid, players first, at most <paramref name="max"/> lines.
+        /// </summary>
+        public static string DescribeCandidates(IList<ScannerGridCandidate> grids, bool playersOnly, int max)
+        {
+            int player = 0, npc = 0, unowned = 0, remote = 0;
+            var players = new List<ScannerGridCandidate>();
+            var others = new List<ScannerGridCandidate>();
+            if (grids != null)
+            {
+                for (int i = 0; i < grids.Count; i++)
+                {
+                    if (grids[i].Remote) remote++;
+                    string cls = OwnerClass(grids[i]);
+                    if (cls == "player") { player++; players.Add(grids[i]); continue; }
+                    if (cls == "npc") npc++;
+                    else unowned++;
+                    if (!playersOnly) others.Add(grids[i]);
+                }
+            }
+            players.AddRange(others);
+            var sb = new StringBuilder();
+            sb.Append("scanner grids: candidates=").Append(player + npc + unowned)
+              .Append(" player=").Append(player).Append(" npc=").Append(npc).Append(" unowned=").Append(unowned)
+              .Append(" remote=").Append(remote);
+            int shown = Math.Min(players.Count, Math.Max(0, max));
+            for (int i = 0; i < shown; i++) sb.Append("\n  ").Append(DescribeCandidate(players[i]));
+            if (players.Count > shown)
+                sb.Append("\n  ... ").Append((players.Count - shown).ToString(CultureInfo.InvariantCulture)).Append(" more");
+            return sb.ToString();
+        }
+
+        /// <summary>One candidate on one line. Position in km, to the metre, so it can be pasted
+        /// into <c>factions scanner probe</c>.</summary>
+        public static string DescribeCandidate(ScannerGridCandidate g)
+        {
+            CultureInfo inv = CultureInfo.InvariantCulture;
+            return g.EntityId.ToString(inv)
+                + " " + OwnerClass(g) + " " + OwnerText(g.OwnerIdentityId, g.OwnerTag, g.OwnerName)
+                + (g.OwnerOffline ? " (offline)" : "")
+                + (g.Remote ? " remote" : "")
+                + " " + (g.Large ? "large" : "small") + " blocks=" + g.Blocks.ToString(inv)
+                + " pos=" + g.PositionKm.X.ToString("0.000", inv) + " " + g.PositionKm.Y.ToString("0.000", inv)
+                + " " + g.PositionKm.Z.ToString("0.000", inv)
+                + " sig=" + g.Signature.ToString("0.00", inv)
+                + " bcastKm=" + g.BroadcastRadiusKm.ToString("0.0", inv)
+                + " dps=" + g.WeaponDps.ToString("0", inv)
+                + " name=\"" + (g.Name ?? "") + "\"";
+        }
+
+        /// <summary>A graded, withheld grid contact on one line, for <c>factions scanner probe</c>:
+        /// the label a client would draw, and the name it would show beside it.</summary>
+        public static string DescribeContact(ScannerContact c, Vec3 originKm)
+        {
+            CultureInfo inv = CultureInfo.InvariantCulture;
+            double dx = c.PositionKm.X - originKm.X, dy = c.PositionKm.Y - originKm.Y, dz = c.PositionKm.Z - originKm.Z;
+            return "grid " + c.EntityId.ToString(inv) + " tier=" + c.Tier
+                + " dKm=" + Math.Sqrt(dx * dx + dy * dy + dz * dz).ToString("0.00", inv)
+                + " label=\"" + (c.Label ?? "") + "\""
+                + (string.IsNullOrEmpty(c.DisplayName) ? "" : " name=\"" + c.DisplayName + "\"");
         }
 
         /// <summary><c>unarmed</c>, <c>armed</c>, or <c>heavily armed</c> from

@@ -2,5 +2,5 @@
 <PluginManifest xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Name>Factions</Name>
   <Guid>5939b993-3159-4582-bc4c-ab4d501ba657</Guid>
-  <Version>v0.631.0</Version>
+  <Version>v0.635.2</Version>
 </PluginManifest>

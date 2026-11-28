@@ -108,7 +108,10 @@ namespace Factions
 
             int quoteId = ++_quoteSeq;
             _streaming[steamId] = quoteId;
-            _uplink.Send(steamId, Encode(quoteId, quote, false, WireExpandVerdict.Ok, null));
+            // A site with no ground under it is the one refusal a readout can already name.
+            WireExpandVerdict readout = quote.Probe != null && quote.Probe.NoGround
+                ? WireExpandVerdict.NoGround : WireExpandVerdict.Ok;
+            _uplink.Send(steamId, Encode(quoteId, quote, false, readout, null));
         }
 
         private void Commit(ulong steamId, int quoteId)
@@ -182,6 +185,7 @@ namespace Factions
                 case PlayerExpandRefusal.EconomyUnavailable:  return WireExpandVerdict.EconomyUnavailable;
                 case PlayerExpandRefusal.ChargeRefused:       return WireExpandVerdict.ChargeRefused;
                 case PlayerExpandRefusal.NoFaction:           return WireExpandVerdict.NoFaction;
+                case PlayerExpandRefusal.NoGround:            return WireExpandVerdict.NoGround;
                 default:                                      return WireExpandVerdict.Ok;
             }
         }

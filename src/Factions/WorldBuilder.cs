@@ -214,8 +214,13 @@ namespace Factions
         /// Writes <c>world_features.json</c> with every anchor resolved to the entity id of the body
         /// just created, and <c>Center</c> set to that body's realised centre so the loader's
         /// no-anchor fallback lands on it rather than at the world origin.
+        /// <para>A planet's orbit band (<see cref="PlannedFeature.OrbitRegionWidthKm"/>) takes its
+        /// inner radius from <paramref name="gravityRadiusKm"/>, the live body's gravity radius by
+        /// entity id. A band whose body has none is left out and named in the result: written at
+        /// radius 0 it would claim the planet's whole well.</para>
         /// </summary>
-        public static string EmitFeatures(WorldPlan plan, string dataDir, string instanceDir)
+        public static string EmitFeatures(WorldPlan plan, string dataDir, string instanceDir,
+                                          Func<long, double> gravityRadiusKm)
         {
             if (plan == null || plan.Features.Count == 0) return "features: nothing to emit.";
 
@@ -227,23 +232,33 @@ namespace Factions
 
             var doc = new FeatureDocument();
             int anchored = 0;
+            var skipped = new List<string>();
             foreach (PlannedFeature pf in plan.Features)
             {
+                PlannedPlanet body;
+                double gravityKm = !string.IsNullOrEmpty(pf.AnchorPlanetName)
+                                   && byName.TryGetValue(pf.AnchorPlanetName, out body)
+                                   && body.RealisedEntityId != 0L && gravityRadiusKm != null
+                    ? gravityRadiusKm(body.RealisedEntityId) : 0;
+                double innerKm, outerKm;
+                if (!pf.TryResolveRadii(gravityKm, out innerKm, out outerKm)) { skipped.Add(pf.Name); continue; }
+
                 var feature = new WorldFeature
                 {
                     Name = pf.Name,
                     Shape = pf.Shape,
                     Center = pf.CenterKm,
                     Normal = pf.Normal,
-                    InnerRadiusKm = pf.InnerRadiusKm,
-                    OuterRadiusKm = pf.OuterRadiusKm,
+                    InnerRadiusKm = innerKm,
+                    OuterRadiusKm = outerKm,
                     HalfThicknessKm = pf.HalfThicknessKm,
                     Density = pf.Density,
                     NodeSeparationKm = pf.NodeSeparationKm,
                     Bands = pf.Bands,
                     Materials = pf.Materials,
                     Zone = pf.Zone,
-                    SpaceRespawn = pf.SpaceRespawn
+                    SpaceRespawn = pf.SpaceRespawn,
+                    GivesUpHole = pf.GivesUpHole
                 };
                 PlannedPlanet anchor;
                 if (!string.IsNullOrEmpty(pf.AnchorPlanetName) && byName.TryGetValue(pf.AnchorPlanetName, out anchor)
@@ -268,7 +283,11 @@ namespace Factions
                 return "features: write FAILED -- " + ex.GetType().Name + ": " + ex.Message;
             }
 
-            return "features: wrote " + doc.Features.Count + " (" + anchored + " anchored) to " + path;
+            return "features: wrote " + doc.Features.Count + " (" + anchored + " anchored) to " + path
+                 + (skipped.Count > 0
+                     ? "; LEFT OUT " + skipped.Count + " orbit band(s) whose body has no live gravity radius: "
+                       + string.Join(", ", skipped.ToArray())
+                     : "");
         }
 
         /// <summary>
@@ -327,7 +346,9 @@ namespace Factions
             foreach (PlannedFeature pf in plan.Features)
                 sb.Append("\n  ~ ").Append(pf.Name).Append(' ').Append(pf.Shape)
                   .Append(string.IsNullOrEmpty(pf.AnchorPlanetName) ? " (free)" : " -> " + pf.AnchorPlanetName)
-                  .Append(' ').Append(pf.OuterRadiusKm.ToString("0.#")).Append(" km");
+                  .Append(' ').Append(pf.OrbitRegionWidthKm > 0
+                      ? "gravity radius + " + pf.OrbitRegionWidthKm.ToString("0.#") + " km (read at emit)"
+                      : pf.OuterRadiusKm.ToString("0.#") + " km");
 
             foreach (string note in plan.Notes) sb.Append("\n  . ").Append(note);
             foreach (string error in plan.Errors) sb.Append("\n  ERROR ").Append(error);

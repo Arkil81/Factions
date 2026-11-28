@@ -7601,7 +7601,6 @@ namespace Factions
             var lines = new System.Collections.Generic.List<string>();
             if (_world == null) { lines.Add("DumpNodeGravity: world not loaded"); return lines; }
             lines.Add("DumpNodeGravity: " + _world.Graph.Nodes.Count + " node(s)"
-                      + "  SurfThresh=" + _world.Tuning.SurfaceGravityThreshold
                       + "  OrbitMin=" + _world.Tuning.OrbitGravityMin);
             foreach (System.Collections.Generic.KeyValuePair<string, SpatialNode> kv in _world.Graph.Nodes)
             {
@@ -7633,8 +7632,7 @@ namespace Factions
             var lines = new System.Collections.Generic.List<string>();
             if (_world == null) { lines.Add("gravityprobe: world not loaded"); return lines; }
 
-            lines.Add("gravityprobe: SurfThresh=" + _world.Tuning.SurfaceGravityThreshold
-                      + " OrbitMin=" + _world.Tuning.OrbitGravityMin);
+            lines.Add("gravityprobe: OrbitMin=" + _world.Tuning.OrbitGravityMin);
 
             foreach (PlanetRecord p in _world.Planets.Planets)
             {
@@ -7654,17 +7652,24 @@ namespace Factions
                 for (int i = 0; i <= 10; i++) radii.Add(p.SurfaceRadius * (i / 10.0));               // inside
                 for (int i = 1; i <= 10; i++)                                                        // band
                     radii.Add(p.SurfaceRadius + (p.GravityRadius - p.SurfaceRadius) * (i / 10.0));
-                radii.Add(p.GravityRadius * 1.05);                                                   // outside
+                radii.Add(p.GravityRadius + 1.0);                                                    // an orbit band's
+                radii.Add(p.GravityRadius + 15.0);                                                   // authored 30 km,
+                radii.Add(p.GravityRadius + 29.0);                                                   // then beyond it
+                radii.Add(p.GravityRadius + 31.0);
 
                 foreach (double r in radii)
                 {
-                    double g = SampleGravityAtRadius(p, r);
+                    Vec3 at = new Vec3(p.Center.X + r, p.Center.Y, p.Center.Z);
+                    double g = _world.Planets.GravityAt(at);
                     double rel = surfaceG > 0 ? g / surfaceG : 0;
+                    NodePlacementProbe quote = _world.ProbePlacement(at);
                     lines.Add("  r=" + r.ToString("0.00") + "km"
                               + " (" + (p.SurfaceRadius > 0 ? (r / p.SurfaceRadius).ToString("0.00") : "-") + "xR)"
                               + " g=" + g.ToString("0.0000")
                               + " rel=" + rel.ToString("0.0000")
-                              + " -> " + ZoneForRelative(g, rel));
+                              + " -> " + _world.ClassifyZone(at)
+                              + " quote=" + quote.Zone + "/" + quote.SeparationKm.ToString("0.#") + "km"
+                              + (quote.NoGround ? " noGround" : ""));
                 }
             }
             if (lines.Count == 1) lines.Add("gravityprobe: no planet matching '" + planetFilter + "'.");
@@ -7674,15 +7679,6 @@ namespace Factions
         private double SampleGravityAtRadius(PlanetRecord p, double radiusKm)
         {
             return _world.Planets.GravityAt(new Vec3(p.Center.X + radiusKm, p.Center.Y, p.Center.Z));
-        }
-
-        /// <summary>The zone <see cref="WorldModel.ClassifyZone"/> would report for a sample, stated
-        /// in terms already computed by the caller so the probe does not re-derive the reference
-        /// planet (which is the very thing under test).</summary>
-        private string ZoneForRelative(double g, double relativeG)
-        {
-            if (g <= 0) return "DeepSpace";
-            return relativeG >= _world.Tuning.SurfaceGravityThreshold ? "Surface" : "Orbit";
         }
 
         public bool SeedTreasuryFor(string tag, long amount)
@@ -8061,6 +8057,7 @@ namespace Factions
             _spawnSettle.Prune(now);
             _landedUnseen.Prune(now);
             _unseenLandings.Prune(now);
+            PruneChaseBrake(now);
             _legOrigins.Prune(now, LegOriginPruneAge);
             if (_spawnSettle.Count == 0 && _settleHeldReported.Count > 0) _settleHeldReported.Clear();
             SweepDepartures(now, isPlayerWithin);
@@ -8244,6 +8241,12 @@ namespace Factions
 
                         // Not yet materialised — check player proximity to sim position
                         Vec3 currentPos = fleet.CurrentPosKm(now, _tuning);
+                        // Near a player it brakes, so a chase can catch it (FactionRuntime.Chase.cs).
+                        if (ApplyChaseBrake(st, fi, fleet, currentPos, now))
+                        {
+                            fleet = st.PendingFleets[fi];
+                            currentPos = fleet.CurrentPosKm(now, _tuning);
+                        }
                         if (!isPlayerWithin(currentPos, _tuning.ObservationRadiusKm))
                         {
                             _unseenLandings.Release(fleet.FleetId);
@@ -8261,13 +8264,16 @@ namespace Factions
                         // schedule frozen until the step drops or the wait reaches its bound.
                         // Traffic control's presence rule: civilian traffic materialises only inside
                         // the nearest player's share of the budget (FactionRuntime.Presence.cs).
+                        // None of the three holds a fleet a player is within the force radius of: a
+                        // hold shrinks the radius a spawn needs, it does not refuse it.
+                        bool forced = ForcesSpawn(currentPos, isPlayerWithin);
                         long ph0 = slowTrace ? Stopwatch.GetTimestamp() : 0;
-                        bool queueHeld = QueueHolds(st, fi, fleet, now);
+                        bool queueHeld = !forced && QueueHolds(st, fi, fleet, now);
                         long ph1 = slowTrace ? Stopwatch.GetTimestamp() : 0;
                         if (slowTrace) _obsPhQueue += ph1 - ph0;
                         if (queueHeld) continue;
                         fleet = st.PendingFleets[fi];
-                        bool presenceRefused = PresenceRefuses(fleet);
+                        bool presenceRefused = !forced && PresenceRefuses(fleet);
                         long ph2 = slowTrace ? Stopwatch.GetTimestamp() : 0;
                         if (slowTrace) _obsPhPresence += ph2 - ph1;
                         if (presenceRefused) continue;
@@ -8276,7 +8282,7 @@ namespace Factions
                         // shrinks its field rather than holding the fleets off.
                         if (WaveHolds(st, fi, fleet, now)) continue;
 
-                        MaterialiseDecision gate = MaterialiseGate != null && !fleet.IsBench ? MaterialiseGate(fleet.Kind) : MaterialiseDecision.Materialise;
+                        MaterialiseDecision gate = MaterialiseGate != null && !fleet.IsBench && !forced ? MaterialiseGate(fleet.Kind) : MaterialiseDecision.Materialise;
                         if (slowTrace) _obsPhGate += Stopwatch.GetTimestamp() - ph2;
                         if (gate == MaterialiseDecision.ResolveOffScreen)
                         {
@@ -8378,6 +8384,10 @@ namespace Factions
                                            + " — no player within despawn radius");
                                 continue;
                             }
+
+                            // A player within the force radius is waiting beside it: it goes next.
+                            if (routing != null && ForcesSpawn(fleet.CurrentPosKm(now, _tuning), isPlayerWithin))
+                                routing.PrioritiseSpawn(fleetKey);
 
                             // Waiting in the spawn queue is not a stalled spawn: keep its clock fresh.
                             // Nor is a spawn an agent is still answering (FAC-506): the agent's own

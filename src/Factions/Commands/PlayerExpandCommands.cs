@@ -76,6 +76,8 @@ namespace Factions.Commands
             string where = "Zone " + p.Zone + ", " + p.SeparationKm.ToString("0.#")
                            + " km separation in force here.";
 
+            if (p.NoGround)
+                return "NO GROUND. " + where + " No ground could be found under this point, so no node can be created here.";
             if (!p.Clear)
                 return "OCCUPIED. " + where + " Fly further out and try again.";
 
@@ -100,6 +102,8 @@ namespace Factions.Commands
                     return "OCCUPIED — nothing was charged. "
                            + result.Quote.Probe.SeparationKm.ToString("0.#")
                            + " km separation is in force here. Fly further out and try again.";
+                case PlayerExpandRefusal.NoGround:
+                    return "NO GROUND — nothing was charged. No ground could be found under this point, so no node can be created here.";
                 case PlayerExpandRefusal.ChargeRefused:
                     return "Not enough in the faction account — nothing was charged or created. "
                            + HowToFund(tag, result.Quote);

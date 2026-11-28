@@ -369,6 +369,7 @@ namespace Factions
             report.Load = LoadReader != null ? LoadReader() : null;
             report.Contacts = ContactsReader != null ? ContactsReader() : null;
             report.OwnedGrids = OwnedGridsReader != null ? OwnedGridsReader() : null;
+            report.ScannerGrids = ScannerGridsReader != null ? ScannerGridsReader() : null;
             return report;
         }
 
@@ -379,6 +380,10 @@ namespace Factions
         /// <summary>The player-owned grids standing here, for the authority's assets window; null on
         /// the reports that do not carry them. Set by the plugin, which owns the grid list.</summary>
         public Func<List<NexusOwnedGrid>> OwnedGridsReader { get; set; }
+
+        /// <summary>The player-owned grid groups sampled here since the last report, for the
+        /// authority's scanner and map; null when nothing was sampled since.</summary>
+        public Func<List<NexusScannerGrid>> ScannerGridsReader { get; set; }
 
         /// <summary>This server's traffic budget, set by the plugin, which owns server perf.</summary>
         public Func<NexusAgentLoad> LoadReader { get; set; }

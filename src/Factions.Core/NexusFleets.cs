@@ -82,6 +82,10 @@ namespace Factions.Core
         /// <summary>Leave only: the clearance to reach, and why.</summary>
         public double ClearM;
         public string Reason;
+        /// <summary>Spawn and respot: a player is within sync distance of this fleet, so the agent puts
+        /// the spawn at the head of its pacer queue (FAC-539). Absent on the wire from an older
+        /// authority, which reads as false.</summary>
+        public bool Priority;
     }
 
     /// <summary>What the authority's observation loop asked of a grid's flight controller over the
@@ -337,6 +341,28 @@ namespace Factions.Core
                 {
                     Op = NexusFleetOp.Respot, Key = key,
                     X = posKm.X, Y = posKm.Y, Z = posKm.Z, Tx = targetKm.X, Ty = targetKm.Y, Tz = targetKm.Z,
+                }, nowUtc);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>Marks the spawn waiting under <paramref name="key"/> as a player's, so its agent
+        /// takes it ahead of its other waiting spawns (<see cref="NexusFleetOrder.Priority"/>). Sent once,
+        /// as a respot to where the order already stands. True when the order was marked now.</summary>
+        public bool Prioritise(string key, DateTime nowUtc)
+        {
+            if (key == null) return false;
+            foreach (Home h in _homes.Values)
+            {
+                NexusFleetOrder o;
+                if (!h.Spawning.TryGetValue(key, out o)) continue;
+                if (o.Priority) return false;
+                o.Priority = true;
+                Queue(h, new NexusFleetOrder
+                {
+                    Op = NexusFleetOp.Respot, Key = key, Priority = true,
+                    X = o.X, Y = o.Y, Z = o.Z, Tx = o.Tx, Ty = o.Ty, Tz = o.Tz,
                 }, nowUtc);
                 return true;
             }

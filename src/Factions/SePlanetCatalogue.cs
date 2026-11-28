@@ -37,6 +37,9 @@ namespace Factions
         // ShipPool.RouteEnvironment.From, which is the hottest call in the plugin (FAC-265).
         private List<PlanetRecord> _cache;
 
+        // The live body behind each record, keyed by PlanetRecord.Id. Built with _cache.
+        private Dictionary<string, MyPlanet> _bodies;
+
         /// <summary>Live bodies, mapped to Core's SE-free record. The list is built on the first
         /// read and reused for the life of the session.
         /// <para>Never enumerate <c>MyEntities.GetEntities()</c> to find planets: that walks every
@@ -55,11 +58,13 @@ namespace Factions
         internal void Invalidate()
         {
             _cache = null;
+            _bodies = null;
         }
 
         private List<PlanetRecord> Build()
         {
             var records = new List<PlanetRecord>();
+            var bodies = new Dictionary<string, MyPlanet>();
             List<MyPlanet> live = MyPlanets.GetPlanets();
             if (live == null || live.Count == 0)
                 // Not cached. An empty answer here is far more likely to mean MyPlanets has not
@@ -83,6 +88,7 @@ namespace Factions
                     Generator     = planet.Generator == null ? "Unknown" : planet.Generator.Id.SubtypeName,
                     Center        = ToKm(c),
                     SurfaceRadius = planet.AverageRadius / 1000.0,
+                    MaximumRadius = planet.MaximumRadius / 1000.0,
                     GravityRadius = gLimit / 1000.0,
                     AtmosphereRadius = (planet.AverageRadius + planet.AtmosphereAltitude) / 1000.0,
                     HasAtmosphere = planet.Generator != null && planet.Generator.HasAtmosphere,
@@ -103,10 +109,22 @@ namespace Factions
                     planet.Generator == null ? null : planet.Generator.Id.SubtypeName,
                     planet.Generator == null || planet.Generator.AllowSurfaceEconomyStations);
                 records.Add(record);
+                bodies[record.Id] = planet;
             }
 
+            _bodies = bodies;
             _cache = records;
             return records;
+        }
+
+        /// <summary>The live body behind <see cref="PlanetGeometry.GroundBody"/>'s answer, or null
+        /// outside every body's reach.</summary>
+        private MyPlanet GroundPlanet(Vec3 posKm)
+        {
+            PlanetRecord record = PlanetGeometry.GroundBody(this, posKm);
+            if (record == null || _bodies == null) return null;
+            MyPlanet planet;
+            return _bodies.TryGetValue(record.Id, out planet) ? planet : null;
         }
 
         public double GravityAt(Vec3 posKm)
@@ -116,10 +134,13 @@ namespace Factions
             return gMult;
         }
 
+        /// <summary>The terrain point under <paramref name="posKm"/>, projected radially onto the body
+        /// <see cref="PlanetGeometry.GroundBody"/> names, from anywhere in its gravity well. The
+        /// input unchanged outside every body's reach.</summary>
         public Vec3 NearestSurfacePoint(Vec3 posKm)
         {
             Vector3D worldPos = ToM(posKm);
-            MyPlanet planet = MyGamePruningStructure.GetClosestPlanet(worldPos);
+            MyPlanet planet = GroundPlanet(posKm);
             if (planet == null) return posKm;
             return ToKm(planet.GetClosestSurfacePointGlobal(worldPos));
         }
@@ -127,7 +148,7 @@ namespace Factions
         public Vec3 SurfaceNormal(Vec3 posKm)
         {
             Vector3D worldPos = ToM(posKm);
-            MyPlanet planet = MyGamePruningStructure.GetClosestPlanet(worldPos);
+            MyPlanet planet = GroundPlanet(posKm);
             if (planet == null) return new Vec3(0, 1, 0);
             Vector3D normal = Vector3D.Normalize(worldPos - planet.PositionComp.GetPosition());
             return new Vec3(normal.X, normal.Y, normal.Z);

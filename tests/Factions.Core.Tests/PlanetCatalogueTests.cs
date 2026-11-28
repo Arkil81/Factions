@@ -30,6 +30,71 @@ namespace Factions.Core.Tests
             Assert.Equal(1.0, catalogue.SurfaceNormal(new Vec3(150, 0, 0)).X, 5);
         }
 
+        private static Vec3 Off(PlanetRecord p, double x, double y, double z)
+        {
+            return new Vec3(p.Center.X + x, p.Center.Y + y, p.Center.Z + z);
+        }
+
+        private static PlanetRecord Tellus()
+        {
+            // Production Tellus: 30 km surface, 48.79 km gravity limit.
+            return new PlanetRecord
+            {
+                Id = "tellus", Center = new Vec3(-938.47, -15.91, 219.96),
+                SurfaceRadius = 30.0, GravityRadius = 48.785, AtmosphereRadius = 34.86, HasAtmosphere = true,
+            };
+        }
+
+        [Fact]
+        public void GroundBody_AnswersAnywhereInTheWell_BeyondTheVoxelCube()
+        {
+            PlanetRecord tellus = Tellus();
+            var catalogue = new StaticPlanetCatalogue(new[] { tellus });
+
+            // N535's production position: 34.83 km out, 34.33 km along X -- outside the 32.77 km
+            // half-extent of Tellus's voxel cube, inside its well.
+            var n535 = new Vec3(-972.7964, -21.8112, 220.0398);
+            Assert.Same(tellus, PlanetGeometry.GroundBody(catalogue, n535));
+
+            // Just inside the gravity limit, and on the surface itself.
+            Assert.Same(tellus, PlanetGeometry.GroundBody(catalogue, Off(tellus, 0, 48.7, 0)));
+            Assert.Same(tellus, PlanetGeometry.GroundBody(catalogue, Off(tellus, 0, 0, 30.0)));
+        }
+
+        [Fact]
+        public void GroundBody_IsNullOutsideEveryReach()
+        {
+            PlanetRecord tellus = Tellus();
+            var catalogue = new StaticPlanetCatalogue(new[] { tellus });
+
+            Assert.Null(PlanetGeometry.GroundBody(catalogue, Off(tellus, 48.9, 0, 0)));
+            Assert.Null(PlanetGeometry.GroundBody(catalogue, new Vec3(0, 0, 0)));
+            Assert.Null(PlanetGeometry.GroundBody(null, new Vec3(0, 0, 0)));
+        }
+
+        [Fact]
+        public void GroundBody_PicksTheBodyWhoseSurfaceIsNearer_ForAMoonInsideItsParentsWell()
+        {
+            var parent = new PlanetRecord { Id = "parent", Center = new Vec3(0, 0, 0), SurfaceRadius = 60, GravityRadius = 300 };
+            var moon = new PlanetRecord { Id = "moon", Center = new Vec3(200, 0, 0), SurfaceRadius = 10, GravityRadius = 20 };
+            var catalogue = new StaticPlanetCatalogue(new[] { parent, moon });
+
+            // 5 km above the moon, 135 km above the parent: the ground under it is the moon's.
+            Assert.Same(moon, PlanetGeometry.GroundBody(catalogue, new Vec3(185, 0, 0)));
+            // In the parent's well, outside the moon's reach.
+            Assert.Same(parent, PlanetGeometry.GroundBody(catalogue, new Vec3(150, 0, 0)));
+        }
+
+        [Fact]
+        public void GroundBody_UsesTheSurfaceRadius_ForABodyWithNoWell()
+        {
+            var rock = new PlanetRecord { Id = "rock", Center = new Vec3(0, 0, 0), SurfaceRadius = 5, GravityRadius = 0 };
+            var catalogue = new StaticPlanetCatalogue(new[] { rock });
+
+            Assert.Same(rock, PlanetGeometry.GroundBody(catalogue, new Vec3(4, 0, 0)));
+            Assert.Null(PlanetGeometry.GroundBody(catalogue, new Vec3(6, 0, 0)));
+        }
+
         [Fact]
         public void RoutePlanner_ReturnsSafeDeterministicEntryAndExitLegsForMultipleBodies()
         {

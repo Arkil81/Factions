@@ -46,6 +46,11 @@ namespace Factions.Core
         /// radius that everything breaches.</summary>
         public bool Clear;
 
+        /// <summary>True when the point is over a planet and the surface snap could not find the
+        /// ground under it, so no node can be created here (<see cref="WorldModel.SeedNodeAt"/>
+        /// refuses it). Never <see cref="Clear"/>.</summary>
+        public bool NoGround;
+
         /// <summary>How far the snap moved the point, km. Zero for a site that is already legal
         /// ground; large for one over a planet, where the node lands on terrain below.</summary>
         public double SnapDistanceKm { get { return RequestedKm.DistanceTo(PlacedKm); } }

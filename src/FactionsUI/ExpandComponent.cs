@@ -250,6 +250,8 @@ public class ExpandComponent : MySessionComponentBase
                 return "You are not in a faction.";
             case WireExpandVerdict.NotLeader:
                 return "Only a leader of your faction can expand it — nothing was charged.";
+            case WireExpandVerdict.NoGround:
+                return "No ground could be found under you — nothing was charged.";
             default:
                 return "Expand failed — nothing was charged.";
         }
@@ -277,7 +279,12 @@ public class ExpandComponent : MySessionComponentBase
         else
         {
             WireExpandStatus s = _status.Value;
-            if (!s.Clear)
+            if (s.Verdict == WireExpandVerdict.NoGround)
+            {
+                text = "SITE  NO GROUND  (no ground found under you)";
+                colour = OccupiedColour;
+            }
+            else if (!s.Clear)
             {
                 text = "SITE  OCCUPIED  (" + Km(s.SeparationKm) + " separation here)" + BlockerNote(s);
                 colour = OccupiedColour;

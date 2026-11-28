@@ -204,15 +204,29 @@ namespace Factions.Core.Tests
         [Fact]
         public void ANodeSnappedToTheOrbitBand_KeepsTheOrbitalTypeItHasToday()
         {
-            // The orbit snap lands on the gravity limit. Orbital-vs-Space is still exactly
-            // "GravityAt > 0", so that node must not silently become a SpaceStation.
+            // The orbit snap lands at the gravity limit of a body nothing may land on -- the only
+            // place it still runs. Orbital-vs-Space is still exactly "GravityAt > 0", so that node
+            // must not silently become a SpaceStation.
             var planets = new OrdinaryPlanetCatalogue();
+            planets.Record.AllowsSurfaceStations = false;
             var world = new WorldModel { Planets = planets, Tuning = ZoneTuning() };
             SpatialNode n = world.Graph.Add(new Vec3(40, 0, 0), 0.5, "N1");
             world.ReclassifyNodes(true);
 
             Assert.Equal(NodeZone.Orbit, n.Zone);
             Assert.Equal(StationSite.Orbital, StationSiting.Classify(planets, n.Position));
+        }
+
+        [Fact]
+        public void ANodeHighInALandableWell_IsGroundedToASurfaceSite()
+        {
+            var planets = new OrdinaryPlanetCatalogue();
+            var world = new WorldModel { Planets = planets, Tuning = ZoneTuning() };
+            SpatialNode n = world.Graph.Add(new Vec3(40, 0, 0), 0.5, "N1");
+            world.ReclassifyNodes(true);
+
+            Assert.Equal(NodeZone.Surface, n.Zone);
+            Assert.Equal(StationSite.Surface, n.Site);
         }
 
         [Fact]
@@ -316,7 +330,6 @@ namespace Factions.Core.Tests
         {
             return new FactionTuning
             {
-                SurfaceGravityThreshold = 0.5,
                 OrbitGravityMin = 0.05,
                 NodeSeparationSurfaceKm = 15.0,
                 NodeSeparationOrbitKm = 30.0,

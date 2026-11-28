@@ -520,12 +520,16 @@ namespace Factions.Core.Tests
 
         private sealed class OnePlanetCatalogue : IPlanetCatalogue
         {
-            private readonly PlanetRecord _p = new PlanetRecord
+            private readonly PlanetRecord _p;
+            public OnePlanetCatalogue(bool allowsSurfaceStations = true)
             {
-                Id = "T", Name = "Tellus", Generator = "Tellus",
-                Center = new Vec3(0, 0, 0), SurfaceRadius = 30, GravityRadius = 300,
-                AllowsSurfaceStations = true,
-            };
+                _p = new PlanetRecord
+                {
+                    Id = "T", Name = "Tellus", Generator = "Tellus",
+                    Center = new Vec3(0, 0, 0), SurfaceRadius = 30, GravityRadius = 300,
+                    AllowsSurfaceStations = allowsSurfaceStations,
+                };
+            }
             public IEnumerable<PlanetRecord> Planets { get { yield return _p; } }
             public double GravityAt(Vec3 posKm)
             {
@@ -555,8 +559,13 @@ namespace Factions.Core.Tests
             world.Planets = new OnePlanetCatalogue();
 
             SpatialNode surface = world.SeedNodeAt("AAA", new Vec3(30, 0, 0));      // on the ground
+            SpatialNode deep    = world.SeedNodeAt("AAA", new Vec3(0, 0, 5000));    // outside the well
+
+            // Off the ground in a well is only reachable over a body nothing may land on: anywhere
+            // else the whole well is Surface and a seed there goes to the ground.
+            var unlandable = new OnePlanetCatalogue(allowsSurfaceStations: false);
+            world.Planets = unlandable;
             SpatialNode orbital = world.SeedNodeAt("AAA", new Vec3(0, 0, 150));     // in the well
-            SpatialNode deep    = world.SeedNodeAt("AAA", new Vec3(0, 0, 5000));    // outside it
 
             Assert.Equal(StationSite.Surface, surface.Site);
 

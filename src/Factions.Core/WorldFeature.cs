@@ -216,6 +216,14 @@ namespace Factions.Core
         [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
         public bool SpaceRespawn;
 
+        /// <summary>True when a <see cref="WorldFeatureShape.Shell"/> leaves the ball inside its inner
+        /// radius to whatever lies there, as a ring always does. A planet's orbit band sets it: the
+        /// band starts where the planet's gravity ends, and the well beneath it is Surface, placed on
+        /// the ground -- not pulled out into the band. False keeps a shell's hole, the behaviour every
+        /// shell had before this field (see <see cref="ClaimsForPlacement"/>). FAC-537.</summary>
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool GivesUpHole;
+
         /// <summary>Concentric sub-annuli with gaps between them. Empty = solid.</summary>
         public List<FeatureBand> Bands = new List<FeatureBand>();
 
@@ -358,17 +366,20 @@ namespace Factions.Core
         /// the extent the author actually described, and nothing outside it should be pulled in. A
         /// <see cref="WorldFeatureShape.Ring"/> additionally gives up the hole in its middle, so a
         /// node near the body a ring hangs off still belongs to that body rather than being flung out
-        /// to the innermost band. A <see cref="WorldFeatureShape.Shell"/> deliberately keeps its hole:
-        /// an authored shell around a planet is meant to compete with that planet's own placement, and
-        /// <see cref="WorldModel"/> settles the two by displacement wherever the planet's candidate is
-        /// its surface. It is the surface snap that competes; the orbit snap yields to any feature
-        /// claiming the point — see <c>WorldModel.PlaceNode</c>.</para></summary>
+        /// to the innermost band. A <see cref="WorldFeatureShape.Shell"/> keeps its hole unless it says
+        /// <see cref="GivesUpHole"/>: an authored shell around a planet is meant to compete with that
+        /// planet's own placement, and <see cref="WorldModel"/> settles the two by displacement
+        /// wherever the planet's candidate is its surface. It is the surface snap that competes; the
+        /// orbit snap yields to any feature claiming the point — see <c>WorldModel.PlaceNode</c>. A
+        /// planet's orbit band gives its hole up, because the well beneath it is the planet's.</para></summary>
         public bool ClaimsForPlacement(Vec3 posKm, Vec3 resolvedCenter)
         {
             double dx = posKm.X - resolvedCenter.X;
             double dy = posKm.Y - resolvedCenter.Y;
             double dz = posKm.Z - resolvedCenter.Z;
-            if (dx * dx + dy * dy + dz * dz > OuterRadiusKm * OuterRadiusKm) return false;
+            double r2 = dx * dx + dy * dy + dz * dz;
+            if (r2 > OuterRadiusKm * OuterRadiusKm) return false;
+            if (Shape == WorldFeatureShape.Shell) return !GivesUpHole || r2 >= InnerRadiusKm * InnerRadiusKm;
             if (Shape != WorldFeatureShape.Ring) return true;
 
             Vec3 n = NormalisedNormal();
@@ -445,8 +456,9 @@ namespace Factions.Core
             {
                 // The claim is exactly the volume, so a claimed point is always already inside.
                 case WorldFeatureShape.Sphere: return 0.0;
-                // Worst case is the centre of the hole, pushed out to the inner surface.
-                case WorldFeatureShape.Shell: return InnerRadiusKm;
+                // Worst case is the centre of the hole, pushed out to the inner surface. A shell that
+                // gives its hole up claims only its own volume, like a sphere.
+                case WorldFeatureShape.Shell: return GivesUpHole ? 0.0 : InnerRadiusKm;
                 case WorldFeatureShape.Ring:
                 {
                     // Radial travel is bounded by the annulus width, height travel by how far off the

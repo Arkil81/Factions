@@ -362,6 +362,78 @@
       ]
     },
     {
+      "Name": "Agni Orbit",
+      "Shape": 2,
+      "Center": {
+        "X": 583.1380606123083,
+        "Y": -38.40879143096726,
+        "Z": -265.19842364489256
+      },
+      "AnchorPlanetId": "86146451428915892",
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 24.33507421875,
+      "OuterRadiusKm": 54.33507421875,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.0,
+      "NodeSeparationKm": 30.0,
+      "Zone": 1,
+      "GivesUpHole": true,
+      "Bands": [],
+      "Materials": []
+    },
+    {
+      "Name": "Tellus Orbit",
+      "Shape": 2,
+      "Center": {
+        "X": -938.4713020339653,
+        "Y": -15.90850984817007,
+        "Z": 219.95657231618216
+      },
+      "AnchorPlanetId": "83859379220048820",
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 48.78525,
+      "OuterRadiusKm": 78.78524999999999,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.0,
+      "NodeSeparationKm": 30.0,
+      "Zone": 1,
+      "GivesUpHole": true,
+      "Bands": [],
+      "Materials": []
+    },
+    {
+      "Name": "Kor Orbit",
+      "Shape": 2,
+      "Center": {
+        "X": -2806.3823678013246,
+        "Y": -154.67313346051066,
+        "Z": 1569.4751398953138
+      },
+      "AnchorPlanetId": "87776476165158207",
+      "Normal": {
+        "X": 0.0,
+        "Y": 1.0,
+        "Z": 0.0
+      },
+      "InnerRadiusKm": 14.37941015625,
+      "OuterRadiusKm": 44.37941015625,
+      "HalfThicknessKm": 0.0,
+      "Density": 0.0,
+      "NodeSeparationKm": 30.0,
+      "Zone": 1,
+      "GivesUpHole": true,
+      "Bands": [],
+      "Materials": []
+    },
+    {
       "Name": "Cinder Nest",
       "Shape": 0,
       "Center": {

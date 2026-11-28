@@ -10,6 +10,7 @@ namespace Factions.Core
         public string Generator;     // SE generator/subtype, e.g. EarthLike
         public Vec3   Center;        // km, world-space
         public double SurfaceRadius; // km — average terrain radius
+        public double MaximumRadius; // km — highest terrain radius; 0 when the host does not know it
         public double GravityRadius; // km — outer edge of detectable gravity
         public double AtmosphereRadius; // km — zero for airless bodies
         public bool   HasAtmosphere;

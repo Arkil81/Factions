@@ -39,7 +39,6 @@ namespace Factions.Core.Tests
                 NodeFrontierMaxOwnedNeighbors = 3,
                 NodeExpansionReachPct = 0.25,
                 NodeExpansionSampleCount = 4,
-                SurfaceGravityThreshold = 0.5,
                 OrbitGravityMin = 0.01,
                 NodeSeparationSurfaceKm = 15.0,
                 NodeSeparationOrbitKm = 30.0,
@@ -1178,7 +1177,10 @@ namespace Factions.Core.Tests
             private readonly PlanetRecord _planet;
             private readonly double _peakG;
 
-            public LowGravityPlanetCatalogue(double peakG, double surfaceRadius = 10, double gravityRadius = 100)
+            /// <param name="landable">False makes the body one nothing may land on, the only place
+            /// an unauthored Orbit zone -- and so the orbit snap -- still exists.</param>
+            public LowGravityPlanetCatalogue(double peakG, double surfaceRadius = 10, double gravityRadius = 100,
+                                             bool landable = true)
             {
                 _peakG = peakG;
                 _planet = new PlanetRecord
@@ -1186,6 +1188,7 @@ namespace Factions.Core.Tests
                     Id = "LowG", Center = new Vec3(0, 0, 0),
                     SurfaceRadius = surfaceRadius, GravityRadius = gravityRadius,
                     AtmosphereRadius = surfaceRadius, HasAtmosphere = true,
+                    AllowsSurfaceStations = landable,
                 };
             }
 
@@ -1228,7 +1231,7 @@ namespace Factions.Core.Tests
 
             private readonly PlanetRecord _parent = new PlanetRecord
             {
-                Id = "Parent", Center = ParentCenter,
+                Id = "Parent", Center = ParentCenter, AllowsSurfaceStations = false,
                 SurfaceRadius = ParentSurfaceRadius, GravityRadius = ParentGravityRadius,
                 AtmosphereRadius = ParentSurfaceRadius, HasAtmosphere = true,
             };
@@ -1276,7 +1279,10 @@ namespace Factions.Core.Tests
             Assert.True(toParent < MoonInsideParentWellCatalogue.ParentGravityRadius, "must sit inside the parent's well");
             Assert.True(toMoon > MoonInsideParentWellCatalogue.MoonGravityRadius, "must sit outside the moon's well");
 
-            Assert.Equal(NodeZone.Orbit, w.ClassifyZone(MismatchZonePos));
+            // The parent forbids landing and the moon does not, so the zone says which body's rule
+            // was read: Orbit is the parent's, Surface would be the nearer moon's.
+            Assert.Equal(NodeZone.Surface, w.ClassifyZone(MismatchZonePos));
+            Assert.Equal(NodeZone.Orbit, w.PlaceableZoneAt(MismatchZonePos));
         }
 
         /// <summary>An Orbit node in the mismatch zone must be snapped into the band of the planet
@@ -1366,13 +1372,14 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
-        public void ClassifyZone_OutsideTheBody_StillUsesTheRelativeReading()
+        public void ClassifyZone_OutsideTheBody_IsSurfaceAcrossTheWholeWell()
         {
             WorldModel w = TestSupport.World();
             w.Planets = new SolidBodyGravityCatalogue();
 
-            // Well out in the band: below the surface threshold, and genuinely not inside the body.
-            Assert.Equal(NodeZone.Orbit, w.ClassifyZone(new Vec3(95, 0, 0)));
+            // Near the edge of the well, at a few percent of surface gravity: still Surface. Gravity
+            // never says Orbit; only an authored region or an unlandable body does.
+            Assert.Equal(NodeZone.Surface, w.ClassifyZone(new Vec3(95, 0, 0)));
             Assert.Equal(NodeZone.DeepSpace, w.ClassifyZone(new Vec3(SolidBodyGravityCatalogue.GravityR + 5, 0, 0)));
         }
 
@@ -1471,15 +1478,39 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
-        public void ClassifyZone_LowGravityPlanetMidBand_ClassifiesOrbit()
+        public void ClassifyZone_LowGravityPlanetMidWell_ClassifiesSurface()
         {
             WorldModel w = TestSupport.World();
             w.Planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100);
 
-            // d=82 -> relativeG = (100-82)/90 = 0.2 -- between the Orbit snap ceiling and the Surface
-            // threshold on any planet, regardless of its absolute peak gravity.
-            NodeZone zone = w.ClassifyZone(new Vec3(82, 0, 0));
-            Assert.Equal(NodeZone.Orbit, zone);
+            // d=82 -> relativeG = (100-82)/90 = 0.2, which the retired relative threshold (0.5) read
+            // as Orbit. The whole well is Surface.
+            Assert.Equal(NodeZone.Surface, w.ClassifyZone(new Vec3(82, 0, 0)));
+        }
+
+        [Fact]
+        public void PlaceableZoneAt_MidWellOfAnUnlandableBody_IsOrbit()
+        {
+            WorldModel w = TestSupport.World();
+            w.Planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100, landable: false);
+
+            Assert.Equal(NodeZone.Orbit, w.PlaceableZoneAt(new Vec3(82, 0, 0)));
+        }
+
+        [Fact]
+        public void ReclassifyNodes_NodeHighInALandableWell_IsGrounded_NotSnappedToOrbit()
+        {
+            WorldModel w = TestSupport.World();
+            w.Planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100);
+            SpatialNode n = w.Graph.Add(new Vec3(70, 0, 0), 0.5, "N1");
+            n.Zone = NodeZone.Orbit;   // what the retired relative reading labelled it
+
+            NodeReclassifyResult applied = w.ReclassifyNodes(applyFix: true);
+
+            Assert.Equal(NodeZone.Surface, n.Zone);
+            Assert.Equal(1, applied.Repositioned);
+            Assert.Equal(0, applied.OrbitRepositioned);
+            Assert.Equal(10.0, n.Position.DistanceTo(new Vec3(0, 0, 0)), 6);
         }
 
         [Fact]
@@ -1514,7 +1545,7 @@ namespace Factions.Core.Tests
         public void ReclassifyNodes_OrbitNodeOutsideBand_RepositionsOnlyWhenApplyFixTrue()
         {
             WorldModel w = TestSupport.World();
-            var planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100);
+            var planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100, landable: false);
             w.Planets = planets;
 
             // d=70 -> relativeG = (100-70)/90 = 0.333 -- inside the wide legacy Orbit band and well
@@ -1543,7 +1574,7 @@ namespace Factions.Core.Tests
         [Fact]
         public void ExpandFrom_OrbitCandidate_SnapsIntoTightenedRelativeBand()
         {
-            var planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100);
+            var planets = new LowGravityPlanetCatalogue(peakG: 0.3, surfaceRadius: 10, gravityRadius: 100, landable: false);
 
             // SequenceRandom(0.75, 0.5, 0.5) forces RandomPointOnSphere's rejection sample to (x,y,z)
             // = (0.5, 0, 0), i.e. direction (1,0,0) -- the candidate lands at exactly (ExpandStep, 0, 0)
@@ -1555,7 +1586,7 @@ namespace Factions.Core.Tests
             WorldModel w = new WorldModel(new SequenceRandom(0.75, 0.5, 0.5))
             {
                 Planets = planets,
-                ExpandStep = 60, // relativeG here = (100-60)/90 = 0.444 -- comfortably below the 0.5 Surface threshold
+                ExpandStep = 60, // relativeG here = (100-60)/90 = 0.444, on a body nothing may land on: Orbit
                 Tuning = new FactionTuning
                 {
                     NodeExpansionSampleCount = 1,
@@ -1563,7 +1594,6 @@ namespace Factions.Core.Tests
                     NodeSeparationSurfaceKm = 1.0,
                     NodeSeparationOrbitKm = 1.0,
                     NodeSeparationDeepSpaceKm = 1.0,
-                    SurfaceGravityThreshold = 0.5,
                     OrbitGravityMin = 0.05,
                 }
             };
@@ -1772,11 +1802,11 @@ namespace Factions.Core.Tests
 
             WorldModel w = TestSupport.World();
             w.PrefabCatalogue = cat;
-            var planets = new LowGravityPlanetCatalogue(peakG: 1.0, surfaceRadius: 10, gravityRadius: 100);
+            var planets = new LowGravityPlanetCatalogue(peakG: 1.0, surfaceRadius: 10, gravityRadius: 100, landable: false);
             w.Planets = planets;
 
-            // d=56 -> relativeG = (100-56)/90 = 0.489 -- Orbit (just under the 0.5 Surface threshold),
-            // deep enough in the well that IonHull's weak thrust fails MinDryTwr (1.05) here.
+            // d=56 -> relativeG = (100-56)/90 = 0.489 -- Orbit (the body forbids landing), deep
+            // enough in the well that IonHull's weak thrust fails MinDryTwr (1.05) here.
             SpatialNode n = w.Graph.Add(new Vec3(56, 0, 0), 0.5, "N1");
             n.OwnerFactionTag = "F";
             n.ShipStock["IonHull"] = 2;

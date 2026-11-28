@@ -18,6 +18,9 @@ namespace Factions.Core
         ChargeRefused,
         /// <summary>The caller could not be resolved to a faction to own the node.</summary>
         NoFaction,
+        /// <summary>Over a planet, and the ground under the point could not be found
+        /// (<see cref="NodePlacementProbe.NoGround"/>).</summary>
+        NoGround,
     }
 
     /// <summary>Everything the host has to resolve before a player-driven Expand can be decided.</summary>
@@ -141,6 +144,8 @@ namespace Factions.Core
             if (string.IsNullOrEmpty(req.FactionTag) || req.FactionIdentityId == 0)
                 return Refuse(result, PlayerExpandRefusal.NoFaction, req);
 
+            if (quote.Probe.NoGround)
+                return Refuse(result, PlayerExpandRefusal.NoGround, req);
             if (!quote.Probe.Clear)
                 return Refuse(result, PlayerExpandRefusal.Occupied, req);
 

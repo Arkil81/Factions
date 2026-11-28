@@ -108,6 +108,37 @@ namespace Factions
             return SpawnPacing.Pacer.Withdraw(SpawnPacing.FleetKey(fleetKey));
         }
 
+        /// <summary>A player is within sync distance of this fleet: its waiting spawn, and each waiting
+        /// hull of a squadron, goes to the head of whichever queue holds it (an agent's, through
+        /// <see cref="NexusFleetRegistry.Prioritise"/>, or the local pacer). A spawn not waiting
+        /// anywhere is left alone, so no queue gains an entry nobody polls.</summary>
+        internal void PrioritiseSpawn(string fleetKey)
+        {
+            if (fleetKey == null) return;
+            DateTime now = DateTime.UtcNow;
+            PrioritiseOne(fleetKey, now);
+            SquadronSpawnState state;
+            if (_squadrons.TryGetValue(fleetKey, out state))
+                for (int i = 0; i < state.Done.Length; i++)
+                    if (!state.Done[i]) PrioritiseOne(SubKey(fleetKey, i), now);
+        }
+
+        private void PrioritiseOne(string key, DateTime now)
+        {
+            if (Remote != null && Remote.IsSpawning(key)) { Remote.Prioritise(key, now); return; }
+            string paced = SpawnPacing.FleetKey(key);
+            if (SpawnPacing.Pacer.IsWaiting(paced)) SpawnPacing.Pacer.Prioritise(paced, now);
+        }
+
+        /// <summary>Agent: a spawn the authority marked as a player's goes to the head of the local
+        /// pacer's queue. No-op unless it is waiting there.</summary>
+        internal void PrioritiseQueued(string fleetKey)
+        {
+            if (fleetKey == null) return;
+            string paced = SpawnPacing.FleetKey(fleetKey);
+            if (SpawnPacing.Pacer.IsWaiting(paced)) SpawnPacing.Pacer.Prioritise(paced, DateTime.UtcNow);
+        }
+
         /// <summary>Agent: takes a withdrawn spawn out of the local pacer's queue.</summary>
         internal void WithdrawQueued(string fleetKey)
         {

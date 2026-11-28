@@ -1574,10 +1574,12 @@ namespace Factions.Core
                     Vec3 candidatePos = RandomPointOnSphere(origin, step);
                     NodeZone candidateZone = PlaceableZoneAt(candidatePos);
 
-                    candidatePos = PlaceNode(candidatePos, candidateZone);
+                    bool midAir;
+                    candidatePos = PlaceNode(candidatePos, candidateZone, out midAir);
+                    if (midAir) continue;
 
                     double candidateMinSep = SeparationAtKm(candidatePos);
-                    if (candidateMinSep > 0 && HasNodeWithin(candidatePos, candidateMinSep))
+                    if (candidateMinSep > 0 && HasNodeWithin(candidatePos, candidateZone, candidateMinSep))
                         continue;
 
                     double nearestDistance = NearestNodeDistance(candidatePos);
@@ -1697,7 +1699,9 @@ namespace Factions.Core
         /// </summary>
         public SpatialNode SeedNodeAt(string factionTag, Vec3 posKm)
         {
-            Vec3 placed = ProjectSeedPosition(posKm);
+            bool midAir;
+            Vec3 placed = ProjectSeedPosition(posKm, out midAir);
+            if (midAir) return null;
             // Re-derive after the snap: lifting a point to a surface or into a ring band can move it
             // across a region boundary, and the zone that matters is the one it ends up in.
             NodeZone finalZone = PlaceableZoneAt(placed);
@@ -1729,7 +1733,15 @@ namespace Factions.Core
         /// </summary>
         public Vec3 ProjectSeedPosition(Vec3 posKm)
         {
-            return PlaceNode(posKm, PlaceableZoneAt(posKm));
+            bool midAir;
+            return ProjectSeedPosition(posKm, out midAir);
+        }
+
+        /// <summary><see cref="ProjectSeedPosition(Vec3)"/>, also saying whether the placement is a
+        /// surface snap that could not find the ground (see <see cref="PlaceNode(Vec3, NodeZone, out bool)"/>).</summary>
+        public Vec3 ProjectSeedPosition(Vec3 posKm, out bool midAir)
+        {
+            return PlaceNode(posKm, PlaceableZoneAt(posKm), out midAir);
         }
 
         /// <summary>
@@ -1748,7 +1760,8 @@ namespace Factions.Core
         /// </summary>
         public NodePlacementProbe ProbePlacement(Vec3 posKm)
         {
-            Vec3 placed = ProjectSeedPosition(posKm);
+            bool midAir;
+            Vec3 placed = ProjectSeedPosition(posKm, out midAir);
             double separation = SeparationAtKm(placed);
             double nearest = NearestNodeDistance(placed);
             var probe = new NodePlacementProbe
@@ -1758,11 +1771,17 @@ namespace Factions.Core
                 Zone = PlaceableZoneAt(placed),
                 SeparationKm = separation,
                 NearestNodeKm = nearest,
+                NoGround = midAir,
             };
             // A non-positive separation is the world declining to impose a rule here, not a radius
             // everything violates -- CommitNode skips its own violation bookkeeping on exactly the
-            // same condition.
-            probe.Clear = separation <= 0 || nearest >= separation;
+            // same condition. A point with no ground under it is never clear: SeedNodeAt refuses it.
+            // Measured per neighbour, so an orbit site owes a surface node below it only that node's
+            // own separation (OwedSeparationKm).
+            string crowdingId;
+            double crowdingKm, owedKm;
+            probe.Clear = !midAir && (separation <= 0
+                || !TryGetNearestNodeWithin(null, placed, probe.Zone, separation, out crowdingId, out crowdingKm, out owedKm));
             return probe;
         }
 
@@ -1910,18 +1929,10 @@ namespace Factions.Core
             return new Vec3(center.X + x * scale, center.Y + y * scale, center.Z + z * scale);
         }
 
-        /// <summary>Relative-gravity classification: Surface/Orbit require comparing raw
-        /// <see cref="IPlanetCatalogue.GravityAt"/> against THAT planet's own true surface gravity, not
-        /// an absolute constant — the live SE host's real gravity multiplier varies by planet (unlike
-        /// the offline sim's model, which always normalizes to exactly 1.0 at any planet's surface), so
-        /// an absolute threshold misclassifies zones on any planet whose true surface gravity isn't
-        /// ~1.0. <c>g == 0</c> (outside every planet's gravity well entirely) is always DeepSpace;
-        /// otherwise <c>relativeG = g / LocalSurfaceG(pos)</c> is compared against
-        /// <see cref="FactionTuning.SurfaceGravityThreshold"/> — at/above it is Surface (unchanged
-        /// snap-to-surface behavior), anything below (but still <c>g &gt; 0</c>) is Orbit. See
-        /// <see cref="SnapToOrbitBand"/> for how Orbit positions get corrected into a tight relative
-        /// band, mirroring how Surface positions are already snapped via
-        /// <see cref="IPlanetCatalogue.NearestSurfacePoint"/>.</summary>
+        /// <summary>The gravity reading of a position: inside a well (<c>g &gt; 0</c>) or inside the
+        /// body is Surface, anywhere else DeepSpace. It never says Orbit -- that zone is authored
+        /// (a planet's orbit band, Cauldron's ring) and read by <see cref="PlaceableZoneAt"/> first.
+        /// See docs/economy-territory.md, "Zones".</summary>
         /// <summary>
         /// The zone a <b>node</b> may occupy at this position, as opposed to the zone the position
         /// physically is (<see cref="ClassifyZone"/>). They differ on a body whose own generator
@@ -2027,27 +2038,22 @@ namespace Factions.Core
         {
             // Inside the body itself is Surface as a matter of geometry, decided before any gravity
             // reading. SE's natural gravity falls off linearly toward zero going INWARD from the
-            // surface: below roughly half the surface radius it reads under SurfaceGravityThreshold
-            // (which would classify Orbit and fling a buried node out to the orbit shell), and at the
-            // core it reads zero (which would classify DeepSpace). It must be lifted to the surface.
+            // surface, and at the core it reads zero (which would classify DeepSpace). It must be
+            // lifted to the surface.
             PlanetRecord body = GravityPlanetRecord(pos);
             if (body != null && body.SurfaceRadius > 0 && pos.DistanceTo(body.Center) < body.SurfaceRadius)
                 return NodeZone.Surface;
 
-            double g = Planets.GravityAt(pos);
-            if (g <= 0) return NodeZone.DeepSpace;
-
-            double localSurfaceG = LocalSurfaceG(pos);
-            double relativeG = localSurfaceG > 0 ? g / localSurfaceG : 0;
-
-            if (relativeG >= Tuning.SurfaceGravityThreshold && Tuning.SurfaceGravityThreshold > 0)
-                return NodeZone.Surface;
-            return NodeZone.Orbit; // g > 0, below the relative surface threshold
+            // The whole well is Surface. SE cuts natural gravity off at 0.05 g (GRAVITY_LIMIT_STRENGTH),
+            // so there is no low-gravity shell for an Orbit zone to occupy: a relative threshold put
+            // the Orbit snap on the cutoff itself, where a probe read g == 0 and quoted the 500 km
+            // DeepSpace floor. Orbit is authored instead -- each planet's band just outside its well,
+            // and Cauldron's ring (FAC-537).
+            return Planets.GravityAt(pos) > 0 ? NodeZone.Surface : NodeZone.DeepSpace;
         }
 
-        /// <summary>The nearest planet's own true surface gravity — the denominator for relative zone
-        /// classification (see <see cref="ClassifyZone"/>) and the relative Orbit snap-band (see
-        /// <see cref="SnapToOrbitBand"/>). 0 when no planet is nearby. Never throws; callers must guard
+        /// <summary>The nearest planet's own true surface gravity — the denominator for the relative
+        /// Orbit snap-band (see <see cref="SnapToOrbitBand"/>). 0 when no planet is nearby. Never throws; callers must guard
         /// divide-by-zero themselves. Samples a synthetic radius rather than
         /// <see cref="IPlanetCatalogue.NearestSurfacePoint"/> (a terrain-following lookup on the live
         /// host) so the value is a stable per-planet constant — see
@@ -2090,6 +2096,19 @@ namespace Factions.Core
         /// </summary>
         public Vec3 PlaceNode(Vec3 pos, NodeZone zone)
         {
+            bool midAir;
+            return PlaceNode(pos, zone, out midAir);
+        }
+
+        /// <summary><see cref="PlaceNode(Vec3, NodeZone)"/>, also saying whether the result is a
+        /// surface snap that left the point standing above its body's highest terrain -- the snap
+        /// could not find the ground, and the point is where no station will ever stand. Every
+        /// placement path refuses such a point instead of committing a node, or checking separation,
+        /// there. An authored feature's own placement is never reported: the recipe is the authority
+        /// on where its region puts a node.</summary>
+        public Vec3 PlaceNode(Vec3 pos, NodeZone zone, out bool midAir)
+        {
+            midAir = false;
             Vec3 featurePos;
             bool byFeature = Features.TryPlace(pos, out featurePos);
 
@@ -2099,10 +2118,15 @@ namespace Factions.Core
             else if (zone == NodeZone.Orbit) planetPos = SnapToOrbitBand(pos);
             else byPlanet = false;
 
-            if (!byFeature) return byPlanet ? planetPos : pos;
-            if (!byPlanet) return featurePos;
-            if (zone == NodeZone.Orbit) return featurePos;
-            return featurePos.DistanceSquaredTo(pos) <= planetPos.DistanceSquaredTo(pos) ? featurePos : planetPos;
+            bool tookFeature = byFeature
+                && (!byPlanet || zone == NodeZone.Orbit
+                    || featurePos.DistanceSquaredTo(pos) <= planetPos.DistanceSquaredTo(pos));
+            if (tookFeature) return featurePos;
+            if (!byPlanet) return pos;
+
+            midAir = zone == NodeZone.Surface
+                     && StandsAboveTerrain(planetPos);
+            return planetPos;
         }
 
         /// <summary>Radially repositions <paramref name="candidatePos"/> (already classified Orbit) so
@@ -2572,7 +2596,8 @@ namespace Factions.Core
                         }
                     }
                     else if (surfMoveSq > 1.0 // farther than 1 km from surface sphere
-                             && !RepositionWouldCrowd(n, surfPos, ref result, log))
+                             && !RepositionWouldCrowd(n, surfPos, ref result, log,
+                                    groundEvenIfCrowded: StandsAboveTerrain(n.Position)))
                     {
                         result.Repositioned++;
                         if (applyFix) n.Position = surfPos;
@@ -2695,8 +2720,16 @@ namespace Factions.Core
         /// nodes refused on every boot, 158 of them 0-3 m outside the ring and every one of those
         /// already inside 30 km of a neighbour. The standing crowding stays counted in
         /// <see cref="NodeReclassifyResult.StandingViolations"/>. See docs/issues/FAC-213.</para></summary>
+        /// <summary>Whether <paramref name="posKm"/> stands more than
+        /// <see cref="StationSiting.GroundToleranceKm"/> above the highest terrain of the body under it
+        /// (<see cref="PlanetGeometry.HeightAboveTerrainKm"/>): a position no station can stand on.</summary>
+        private bool StandsAboveTerrain(Vec3 posKm)
+        {
+            return PlanetGeometry.HeightAboveTerrainKm(Planets, posKm) > StationSiting.GroundToleranceKm;
+        }
+
         private bool RepositionWouldCrowd(SpatialNode n, Vec3 targetKm, ref NodeReclassifyResult result,
-                                          List<string> log)
+                                          List<string> log, bool groundEvenIfCrowded = false)
         {
             double requiredKm = SeparationAtKm(targetKm);
             if (requiredKm <= 0) return false;
@@ -2707,10 +2740,24 @@ namespace Factions.Core
                 return false;
 
             string standingNeighbor;
-            double standingKm;
+            double standingKm, standingOwedKm;
             if (n.Position.DistanceSquaredTo(targetKm) <= CrowdedNudgeMaxKm * CrowdedNudgeMaxKm
-                && TryGetNearestNodeWithin(n.Id, n.Position, requiredKm, out standingNeighbor, out standingKm))
+                && TryGetNearestNodeWithin(n.Id, n.Position, n.Zone, requiredKm,
+                                           out standingNeighbor, out standingKm, out standingOwedKm))
                 return false;
+
+            // A node in mid-air is grounded even when that crowds a neighbour. Its station hovers where
+            // nothing can stand, and the separation it passed was measured at that mid-air point. The
+            // pair it leaves is counted in StandingViolations like any other.
+            if (groundEvenIfCrowded)
+            {
+                if (log != null)
+                    log.Add("NODE_GROUNDED_INSIDE_SEPARATION node=" + n.Id
+                            + " neighbor=" + violation.OffendingNeighborId
+                            + " actualKm=" + violation.ActualDistanceKm.ToString("0.0")
+                            + " requiredKm=" + violation.RequiredMinSepKm.ToString("0.0"));
+                return false;
+            }
 
             result.SeparationBlocked++;
             if (log != null)
@@ -2996,17 +3043,28 @@ namespace Factions.Core
             return result;
         }
 
-        private bool HasNodeWithin(Vec3 pos, double radiusKm)
+        private bool HasNodeWithin(Vec3 pos, NodeZone zone, double radiusKm)
         {
-            double r2 = radiusKm * radiusKm;
-            foreach (SpatialNode n in Graph.Nodes.Values)
-            {
-                double dx = n.Position.X - pos.X;
-                double dy = n.Position.Y - pos.Y;
-                double dz = n.Position.Z - pos.Z;
-                if (dx * dx + dy * dy + dz * dz < r2) return true;
-            }
-            return false;
+            string neighborId;
+            double actualKm, owedKm;
+            return TryGetNearestNodeWithin(null, pos, zone, radiusKm, out neighborId, out actualKm, out owedKm);
+        }
+
+        /// <summary>The separation a node at a position in <paramref name="zone"/>, held to
+        /// <paramref name="requiredKm"/> there, owes <paramref name="neighbor"/>.
+        ///
+        /// <para>Between an Orbit node and a Surface node it is the smaller of the two places'
+        /// separations; every other pair owes the full <paramref name="requiredKm"/>. A planet's orbit
+        /// band starts where its gravity ends, 18.8 km above Tellus's ground and 4.9 km above Kor's, so
+        /// the band's own 30 km held against the ground would leave its inner part unusable over any
+        /// surface node (operator, 2026-11-28: a surface neighbour at its own separation). FAC-537.</para></summary>
+        private double OwedSeparationKm(NodeZone zone, double requiredKm, SpatialNode neighbor)
+        {
+            bool crossesGround = (zone == NodeZone.Orbit && neighbor.Zone == NodeZone.Surface)
+                                 || (zone == NodeZone.Surface && neighbor.Zone == NodeZone.Orbit);
+            if (!crossesGround) return requiredKm;
+            double theirs = SeparationAtKm(neighbor.Position);
+            return theirs > 0 && theirs < requiredKm ? theirs : requiredKm;
         }
 
         private List<SpatialNode> NodesWithinRadius(Vec3 pos, double radiusKm, string excludeNodeId)
@@ -3048,8 +3106,9 @@ namespace Factions.Core
             violation = default(NodeSeparationViolation);
 
             string offendingNeighborId;
-            double actualDistanceKm;
-            if (!TryGetNearestNodeWithin(nodeId, pos, requiredMinSepKm, out offendingNeighborId, out actualDistanceKm))
+            double actualDistanceKm, owedKm;
+            if (!TryGetNearestNodeWithin(nodeId, pos, zone, requiredMinSepKm,
+                                         out offendingNeighborId, out actualDistanceKm, out owedKm))
                 return false;
 
             violation = new NodeSeparationViolation
@@ -3058,15 +3117,20 @@ namespace Factions.Core
                 Zone = zone,
                 OffendingNeighborId = offendingNeighborId,
                 ActualDistanceKm = actualDistanceKm,
-                RequiredMinSepKm = requiredMinSepKm,
+                RequiredMinSepKm = owedKm,
             };
             return true;
         }
 
-        private bool TryGetNearestNodeWithin(string excludeNodeId, Vec3 pos, double radiusKm, out string neighborId, out double actualDistanceKm)
+        /// <summary>The nearest node closer to <paramref name="pos"/> than the separation it is owed
+        /// (<see cref="OwedSeparationKm"/>, at most <paramref name="radiusKm"/>), skipping
+        /// <paramref name="excludeNodeId"/>.</summary>
+        private bool TryGetNearestNodeWithin(string excludeNodeId, Vec3 pos, NodeZone zone, double radiusKm,
+                                             out string neighborId, out double actualDistanceKm, out double owedKm)
         {
             neighborId = null;
             actualDistanceKm = 0;
+            owedKm = radiusKm;
 
             double r2 = radiusKm * radiusKm;
             double bestDistanceSq = double.MaxValue;
@@ -3080,8 +3144,12 @@ namespace Factions.Core
                 double distSq = dx * dx + dy * dy + dz * dz;
                 if (distSq >= r2 || distSq >= bestDistanceSq) continue;
 
+                double owed = OwedSeparationKm(zone, radiusKm, n);
+                if (distSq >= owed * owed) continue;
+
                 bestDistanceSq = distSq;
                 neighborId = n.Id;
+                owedKm = owed;
             }
 
             if (neighborId == null) return false;

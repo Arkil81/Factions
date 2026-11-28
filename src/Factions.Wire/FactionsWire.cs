@@ -1350,7 +1350,8 @@ namespace Factions.Wire
     }
 
     /// <summary>Why an Expand did not happen. Mirrors the server's own <c>PlayerExpandRefusal</c>;
-    /// <see cref="Ok"/> is the success case, and the only one on a readout tick.</summary>
+    /// <see cref="Ok"/> is the success case. A readout tick carries only <see cref="Ok"/> or
+    /// <see cref="NoGround"/>.</summary>
     public enum WireExpandVerdict : byte
     {
         Ok = 0,
@@ -1360,6 +1361,9 @@ namespace Factions.Wire
         NoFaction = 4,
         /// <summary>The caller is not a leader of their faction; expanding spends its treasury.</summary>
         NotLeader = 5,
+        /// <summary>Over a planet, and the ground under the player could not be found. A client that
+        /// predates this value shows its generic refusal, which is also true.</summary>
+        NoGround = 6,
     }
 
     /// <summary>The placement verdict at one player's own position — a readout tick, or the answer

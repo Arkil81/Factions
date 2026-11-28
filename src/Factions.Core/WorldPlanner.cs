@@ -193,6 +193,32 @@ namespace Factions.Core
                 }
             }
 
+            // Each authored orbit region becomes a band feature. Its radii are left to the emitter,
+            // which reads the body's live gravity radius -- see RecipeOrbitRegion.
+            foreach (RecipePlanet rp in recipe.Planets)
+            {
+                if (rp == null || rp.OrbitRegion == null || string.IsNullOrEmpty(rp.Name)) continue;
+                if (rp.OrbitRegion.WidthKm <= 0)
+                {
+                    plan.Errors.Add(rp.Name + ": OrbitRegion.WidthKm must be greater than zero.");
+                    continue;
+                }
+                PlannedPlanet body;
+                if (!byName.TryGetValue(rp.Name, out body)) continue;
+                plan.Features.Add(new PlannedFeature
+                {
+                    Name = body.Name + " Orbit",
+                    Shape = WorldFeatureShape.Shell,
+                    AnchorPlanetName = body.Name,
+                    Normal = new Vec3(0, 1, 0),
+                    Zone = NodeZone.Orbit,
+                    NodeSeparationKm = rp.OrbitRegion.NodeSeparationKm,
+                    Materials = new List<FeatureMaterial>(),   // barren: an authored statement, not "no opinion"
+                    GivesUpHole = true,
+                    OrbitRegionWidthKm = rp.OrbitRegion.WidthKm
+                });
+            }
+
             foreach (RecipeFeature rf in recipe.Features)
             {
                 if (rf == null) { plan.Errors.Add("null feature entry."); continue; }

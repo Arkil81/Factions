@@ -246,6 +246,42 @@ namespace Factions.Core.Tests
             Assert.Equal("My marker", ScannerNames.HudText("My marker", ""));
         }
 
+        /// <summary>The HUD's Alt-up text for a grid is cut from the label the server composes, so
+        /// this reads <see cref="ScannerGrids.Label"/>'s own output rather than a copy of its format:
+        /// a change to the label that moves the owner breaks here, not on a player's screen.</summary>
+        [Theory]
+        [InlineData(1L, "Srr", "RaVe", false, "[Srr]")]          // a player in a faction
+        [InlineData(1L, "Srr", "RaVe", true, "[Srr]")]           // with "owner offline" at the end
+        [InlineData(1L, "SPRT", null, false, "[SPRT]")]          // an NPC owner: the tag alone
+        [InlineData(1L, null, "RaVe", false, "")]                // a factionless player
+        [InlineData(0L, null, null, false, "")]                  // Unowned
+        [InlineData(1L, null, null, false, "")]                  // Unknown owner
+        [InlineData(1L, "Srr", "Ra [V] e", false, "[Srr]")]      // brackets in the player's name
+        public void ScannerNames_GridOwnerTag_IsTheOwnersTagFromTheIdentifiedLabel(
+            long owner, string tag, string name, bool offline, string expected)
+        {
+            var tuning = new FactionTuning();
+            Assert.Equal(expected, ScannerNames.GridOwnerTag(
+                ScannerGrids.Label(true, true, false, true, 612, owner, tag, name, offline, 0, tuning)));
+            Assert.Equal(expected, ScannerNames.GridOwnerTag(
+                ScannerGrids.Label(true, true, true, false, 40, owner, tag, name, offline, 500, tuning)));
+        }
+
+        [Fact]
+        public void ScannerNames_GridOwnerTag_IsEmptyBelowTheIdentityTier()
+        {
+            var tuning = new FactionTuning();
+            // Contact tier, and Class tier with and without armament: no owner segment to cut.
+            Assert.Equal("", ScannerNames.GridOwnerTag(
+                ScannerGrids.Label(false, false, false, true, 612, 1, "Srr", "RaVe", false, 0, tuning)));
+            Assert.Equal("", ScannerNames.GridOwnerTag(
+                ScannerGrids.Label(true, false, false, true, 612, 1, "Srr", "RaVe", false, 0, tuning)));
+            Assert.Equal("", ScannerNames.GridOwnerTag(
+                ScannerGrids.Label(true, false, true, true, 612, 1, "Srr", "RaVe", false, 500, tuning)));
+            Assert.Equal("", ScannerNames.GridOwnerTag(null));
+            Assert.Equal("", ScannerNames.GridOwnerTag(""));
+        }
+
         [Fact]
         public void ScannerContacts_NonFleetKinds_CarryNoFleetFields()
         {

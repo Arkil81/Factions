@@ -194,6 +194,29 @@ namespace Factions.Core
         /// Null and false both mean no pool. docs/food-and-population.md, FAC-493.
         /// </summary>
         public bool? Recruits;
+
+        /// <summary>This body's orbit band: a <see cref="WorldFeatureShape.Shell"/> of
+        /// <see cref="NodeZone.Orbit"/> starting where its gravity ends. Absent authors none -- the
+        /// gas giant has its ring instead. See <see cref="RecipeOrbitRegion"/>.</summary>
+        public RecipeOrbitRegion OrbitRegion;
+    }
+
+    /// <summary>
+    /// A planet's orbit band as authored in the recipe: how wide it is and how densely it may be
+    /// settled. <b>Its inner radius is not authored.</b> It is the body's live gravity radius, read by
+    /// the emitter when <c>world_features.json</c> is written (<c>factions world plan --features</c>),
+    /// because SE sets that radius from the generator definition and a typed number would drift from
+    /// it. The band carries no ore: it exists for player nodes (operator, 2026-11-28: <i>"Even though
+    /// the orbit sites don't have resources, they're still useful for player nodes."</i>). FAC-537.
+    /// </summary>
+    public sealed class RecipeOrbitRegion
+    {
+        /// <summary>Radial width of the band, from the gravity radius outward.</summary>
+        public double WidthKm = 30.0;
+
+        /// <summary>Minimum km between two nodes in the band. Absent falls back to
+        /// <see cref="FactionTuning.NodeSeparationOrbitKm"/>.</summary>
+        public double? NodeSeparationKm;
     }
 
     /// <summary>

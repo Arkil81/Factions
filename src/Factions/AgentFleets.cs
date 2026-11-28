@@ -201,6 +201,7 @@ namespace Factions
                     if (o.Key == null || !_spawning.TryGetValue(o.Key, out sp) || sp.Withdrawn) return;
                     sp.Order.X = o.X; sp.Order.Y = o.Y; sp.Order.Z = o.Z;
                     sp.Order.Tx = o.Tx; sp.Order.Ty = o.Ty; sp.Order.Tz = o.Tz;
+                    if (o.Priority) sp.Order.Priority = true;
                     return;
                 }
                 case NexusFleetOp.Withdraw:
@@ -503,6 +504,7 @@ namespace Factions
                         eid = _spawner.SpawnOrdered(key, (ActionKind)o.Kind, o.Tag, o.FactionId,
                                                     new Vec3(o.X, o.Y, o.Z), new Vec3(o.Tx, o.Ty, o.Tz), o.Prefab,
                                                     o.MunitionsId, o.Munitions);
+                        if (eid == 0 && o.Priority) _spawner.PrioritiseQueued(key);
                         if (eid == 0) continue;
                     }
                 }

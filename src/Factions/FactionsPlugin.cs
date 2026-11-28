@@ -1066,6 +1066,7 @@ namespace Factions
                 _remoteNow = new List<RemotePlayer>();
                 _agentContacts.Clear();
                 _agentOwnedGrids.Clear();
+                _agentScannerGrids.Clear();
                 _ownedGridsReportTick = 0;
                 _agentLoads.Clear();
                 _agentContactsSampled = false;
@@ -2274,6 +2275,34 @@ namespace Factions
             return false;
         }
 
+        /// <summary>The distance in km from <paramref name="posKm"/> to the nearest player that
+        /// <see cref="AnyPlayerOrFlownWithinKm"/> would count; positive infinity when there is none.</summary>
+        private double NearestPlayerOrFlownKm(Factions.Core.Vec3 posKm)
+        {
+            double best2 = double.PositiveInfinity;
+            CachedPlayer[] players = _cachedPlayers;
+            foreach (CachedPlayer p in players)
+            {
+                double dx = p.Pos.X / 1000.0 - posKm.X, dy = p.Pos.Y / 1000.0 - posKm.Y, dz = p.Pos.Z / 1000.0 - posKm.Z;
+                double d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 < best2) best2 = d2;
+            }
+            if (_nexusRole == NexusRole.Authority)
+            {
+                IList<RemotePlayer> remote = RemotePlayersNow();
+                DateTime now = DateTime.UtcNow;
+                for (int i = 0; i < remote.Count; i++)
+                {
+                    if (!_fleetRegistry.CanFly(remote[i].HomeServerId, now)) continue;
+                    Vec3 m = remote[i].PositionM;
+                    double dx = m.X / 1000.0 - posKm.X, dy = m.Y / 1000.0 - posKm.Y, dz = m.Z / 1000.0 - posKm.Z;
+                    double d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 < best2) best2 = d2;
+                }
+            }
+            return Math.Sqrt(best2);
+        }
+
         private int FlownRemoteCount()
         {
             if (_nexusRole != NexusRole.Authority) return 0;
@@ -2501,6 +2530,7 @@ namespace Factions
                 _agentHands.LoadReader = ReadAgentLoad;
                 _agentHands.ContactsReader = ReadAgentContacts;
                 _agentHands.OwnedGridsReader = ReadAgentOwnedGrids;
+                _agentHands.ScannerGridsReader = ReadAgentScannerGrids;
                 FactionWalletTransferPatch.AgentSink = (from, to, amount) =>
                 {
                     if (_agentHands != null) _agentHands.RecordTransfer(from, to, amount);
@@ -2951,6 +2981,7 @@ namespace Factions
             if (report.Contacts != null)
                 _agentContacts[homeServerId] = new KeyValuePair<List<NexusPlayerContact>, DateTime>(report.Contacts, DateTime.UtcNow);
             _agentOwnedGrids.Update(homeServerId, report.OwnedGrids, DateTime.UtcNow);
+            _agentScannerGrids.Update(homeServerId, report.ScannerGrids, DateTime.UtcNow);
             if (_runtime != null) _runtime.SetAgentMutedStations(homeServerId, report.Muted, DateTime.UtcNow);
             if (report.Names != null)
                 for (int i = 0; i < report.Names.Count; i++)
@@ -3437,7 +3468,7 @@ namespace Factions
                 if (_relayTick % GpsUpdateTicks == 0)
                 {
                     StallWatchdog.Enter("agent.emissions");
-                    try { SampleGridEmissions(); _agentContactsSampled = true; }
+                    try { SampleGridEmissions(); _agentContactsSampled = true; _agentScannerGridsSampled = true; }
                     catch (Exception ex) { Log.Warn(ex, "Player excitation sample failed."); }
                 }
             }
@@ -4184,8 +4215,9 @@ namespace Factions
                 if (grid == null || grid.MarkedForClose || grid.IsPreview || grid.Projector != null)
                     return false;
                 if (grid.BlocksCount < minBlocks) return false;
-                CollectHull(grid);
-                if (!GridReaper.IsPlayerOwned(players, grid)) return false;
+                bool playerOwned = GridReaper.IsPlayerOwned(players, grid);
+                CollectHull(grid, playerOwned);
+                if (!playerOwned) return false;
                 _ownedGrids.Add(grid);
                 return false;
             });
@@ -5686,6 +5718,7 @@ namespace Factions
 
                         actorStart = Stopwatch.GetTimestamp(); AllocProbe.SectionStart();
                         StallWatchdog.Enter("fleetObservation");
+                        if (runtime.NearestPlayerKm == null) runtime.NearestPlayerKm = NearestPlayerOrFlownKm;
                         try { runtime.UpdateObservation(AnyPlayerOrFlownWithinKm, PlayersWithinKm, _playerPositionsKm.Count + FlownRemoteCount()); }
                         finally { fleetObservationTicks = Stopwatch.GetTimestamp() - actorStart; AllocProbe.SectionEnd("fleetObservation"); }
 
@@ -7120,7 +7153,11 @@ namespace Factions
                     return "scanner: usage 'factions scanner probe <small|large> <xKm> <yKm> <zKm>'.";
                 return _playerScannerManager.Probe(large, new Vec3(x, y, z));
             }
-            return "scanner: use profile <steamId>, level <steamId> <level>, or probe <small|large> <xKm> <yKm> <zKm>.";
+            if (sub == "grids")
+                return _playerScannerManager.DescribeGrids(
+                    t.Length > 3 && t[3].Equals("player", StringComparison.OrdinalIgnoreCase));
+            return "scanner: use profile <steamId>, level <steamId> <level>, probe <small|large> <xKm> <yKm> <zKm>,"
+                 + " or grids [player].";
         }
 
         /// <summary>Operator controls for the economic simulation (driven via the command bridge).</summary>
@@ -8641,7 +8678,7 @@ namespace Factions
                                 && string.Equals(pp.Definition, subtype, StringComparison.OrdinalIgnoreCase))
                             { pp.RealisedEntityId = lp.EntityId; break; }
                     }
-                    described += "\n  " + WorldBuilder.EmitFeatures(plan, StorageDir, InstanceDir);
+                    described += "\n  " + WorldBuilder.EmitFeatures(plan, StorageDir, InstanceDir, LiveGravityRadiusKm);
                     // The ring feature and RGG's own config are two halves of one annulus, so they
                     // are emitted by one flag: regenerating either alone is how they come to disagree.
                     // Staging needs nothing apply sets -- PlannedPlanet.StorageName derives from the
@@ -8678,10 +8715,21 @@ namespace Factions
             }
 
             Log.Info("World apply created " + applied.Created.Count + " planet(s).");
-            if (wantFeatures) result += "\n  " + WorldBuilder.EmitFeatures(plan, StorageDir, InstanceDir);
+            if (wantFeatures) result += "\n  " + WorldBuilder.EmitFeatures(plan, StorageDir, InstanceDir, LiveGravityRadiusKm);
 
             result += StageGasGiants(plan, recipe, justCreated: true);
             return result;
+        }
+
+        /// <summary>The live gravity radius, in km, of the planet with this entity id, or 0 when the
+        /// catalogue has no such body. What a planet's orbit band is measured from.</summary>
+        private double LiveGravityRadiusKm(long entityId)
+        {
+            if (_planetCatalogue == null) return 0;
+            string id = entityId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            foreach (PlanetRecord p in _planetCatalogue.Planets)
+                if (p != null && string.Equals(p.Id, id, StringComparison.Ordinal)) return p.GravityRadius;
+            return 0;
         }
 
         /// <summary>Merges this plan's gas giants into a staging copy of Real Gas Giants' config and

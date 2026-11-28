@@ -322,6 +322,95 @@ namespace Factions.Core
     }
 
     /// <summary>
+    /// A player-owned grid on an agent, as the authority's scanner and map need it: one per
+    /// mechanical group, led by its largest grid. The authority scans every player against its own
+    /// shard's grids; these add the grids standing on the other shards.
+    /// </summary>
+    public sealed class NexusScannerGrid
+    {
+        /// <summary>The group's largest grid.</summary>
+        public long Id;
+        public long Owner;
+        /// <summary>The owner's tag and name as the agent knows them, for an owner the authority's
+        /// tables have not met.</summary>
+        public string OwnerTag;
+        public string OwnerName;
+        /// <summary>Position, km, to the metre; velocity, km/min.</summary>
+        public double X, Y, Z;
+        public double Vx, Vy, Vz;
+        public double Signature;
+        public double BroadcastKm;
+        public bool Large;
+        /// <summary>Blocks across the whole group.</summary>
+        public int Blocks;
+        public string Name;
+        public double Dps;
+
+        public static NexusScannerGrid From(ScannerGridCandidate g)
+        {
+            return new NexusScannerGrid
+            {
+                Id = g.EntityId, Owner = g.OwnerIdentityId, OwnerTag = g.OwnerTag, OwnerName = g.OwnerName,
+                X = Math.Round(g.PositionKm.X, 3), Y = Math.Round(g.PositionKm.Y, 3), Z = Math.Round(g.PositionKm.Z, 3),
+                Vx = Math.Round(g.VelocityKmPerMin.X, 3), Vy = Math.Round(g.VelocityKmPerMin.Y, 3),
+                Vz = Math.Round(g.VelocityKmPerMin.Z, 3),
+                Signature = Math.Round(g.Signature, 4), BroadcastKm = Math.Round(g.BroadcastRadiusKm, 3),
+                Large = g.Large, Blocks = g.Blocks, Name = g.Name, Dps = Math.Round(g.WeaponDps, 1),
+            };
+        }
+
+        /// <summary>The candidate as the agent saw it, marked remote. <see cref="ScannerGridCandidate.OwnerOffline"/>
+        /// is false: the authority judges it against its own player index.</summary>
+        public ScannerGridCandidate ToCandidate()
+        {
+            return new ScannerGridCandidate
+            {
+                EntityId = Id, PositionKm = new Vec3(X, Y, Z), VelocityKmPerMin = new Vec3(Vx, Vy, Vz),
+                Signature = Signature, BroadcastRadiusKm = BroadcastKm, OwnerIdentityId = Owner,
+                OwnerTag = OwnerTag, OwnerName = OwnerName, Large = Large, Blocks = Blocks, Name = Name,
+                WeaponDps = Dps, Remote = true,
+            };
+        }
+    }
+
+    /// <summary>
+    /// The authority's latest scanner-grid list from each agent. A report replaces that agent's
+    /// list; an agent that stops reporting ages out whole.
+    /// </summary>
+    public sealed class NexusScannerGridBook
+    {
+        private readonly Dictionary<byte, KeyValuePair<List<NexusScannerGrid>, DateTime>> _byHome =
+            new Dictionary<byte, KeyValuePair<List<NexusScannerGrid>, DateTime>>();
+
+        public void Update(byte homeServerId, List<NexusScannerGrid> grids, DateTime nowUtc)
+        {
+            if (grids == null) return;
+            _byHome[homeServerId] = new KeyValuePair<List<NexusScannerGrid>, DateTime>(grids, nowUtc);
+        }
+
+        public void Clear() { _byHome.Clear(); }
+
+        /// <summary>Every grid from an agent that reported within <paramref name="maxAge"/>, other
+        /// than those in <paramref name="skip"/>: a grid mid-crossing can be on two lists at once.</summary>
+        public void AppendFresh(List<ScannerGridCandidate> into, DateTime nowUtc, TimeSpan maxAge, HashSet<long> skip)
+        {
+            if (into == null) return;
+            foreach (KeyValuePair<byte, KeyValuePair<List<NexusScannerGrid>, DateTime>> kv in _byHome)
+            {
+                if (nowUtc - kv.Value.Value > maxAge) continue;
+                List<NexusScannerGrid> list = kv.Value.Key;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    NexusScannerGrid g = list[i];
+                    if (g == null || g.Id == 0 || g.Owner == 0) continue;
+                    if (skip != null && !skip.Add(g.Id)) continue;
+                    into.Add(g.ToCandidate());
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// The authority's latest owned-grid list from each agent. A report replaces that agent's
     /// list; an agent that stops reporting ages out whole, so a crashed shard's grids do not stay
     /// listed.
@@ -423,6 +512,9 @@ namespace Factions.Core
         /// <summary>Every player-owned grid standing here, as of this server's last sweep; null when
         /// it has not swept since, and the authority keeps the last list it had.</summary>
         public List<NexusOwnedGrid> OwnedGrids;
+        /// <summary>Every player-owned grid group here, for the authority's scanner and map; null
+        /// when it has not sampled since, and the authority keeps the last list it had.</summary>
+        public List<NexusScannerGrid> ScannerGrids;
         /// <summary>Faction-terminal transfers made here and not yet acknowledged, oldest first.</summary>
         public List<NexusWalletTransfer> Transfers;
         /// <summary>Store and Services Terminal events made here and not yet acknowledged, oldest first.</summary>

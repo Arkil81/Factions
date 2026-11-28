@@ -95,7 +95,6 @@ namespace Factions.Core.Tests
         {
             return new FactionTuning
             {
-                SurfaceGravityThreshold = 0.5,
                 OrbitGravityMin = 0.05,
                 NodeSeparationSurfaceKm = 15.0,
                 NodeSeparationOrbitKm = 30.0,
@@ -248,6 +247,17 @@ namespace Factions.Core.Tests
             return w;
         }
 
+        /// <summary>The gas giant as the live world authors it: nothing may land on it
+        /// (<c>AllowSurfaceNodes: false</c> in the genesis recipe). The whole of a well is Surface by
+        /// gravity, so on this body it is that rule, not a low-gravity reading, that makes the upper
+        /// well Orbit and puts the orbit snap in play at all.</summary>
+        private static WorldModel UnlandableGasGiantWorld(params WorldFeature[] features)
+        {
+            WorldModel w = GasGiantWorld(features);
+            ((GasGiantCatalogue)w.Planets).Record.AllowsSurfaceStations = false;
+            return w;
+        }
+
         [Fact]
         public void WithoutAFeature_TheHeuristicDragsARingNodeOntoTheVoxelCore()
         {
@@ -360,7 +370,7 @@ namespace Factions.Core.Tests
         [Fact]
         public void ANodeOffThePlaneInsideTheOrbitBand_GoesToTheRing_NotToTheGravityLimit()
         {
-            WorldModel w = GasGiantWorld(CauldronRing());
+            WorldModel w = UnlandableGasGiantWorld(CauldronRing());
             SpatialNode n = w.Graph.Add(new Vec3(JustInsideOrbitBandR, 30, 0), 0.5, "N1");
 
             NodeReclassifyResult r = w.ReclassifyNodes(true);
@@ -377,7 +387,7 @@ namespace Factions.Core.Tests
         [Fact]
         public void PlaceNode_GivesTheRingTheOrbitSnapsPoint()
         {
-            WorldModel w = GasGiantWorld(CauldronRing());
+            WorldModel w = UnlandableGasGiantWorld(CauldronRing());
             var pos = new Vec3(JustInsideOrbitBandR, 30, 0);
 
             Vec3 placed = w.PlaceNode(pos, w.PlaceableZoneAt(pos));
@@ -392,11 +402,11 @@ namespace Factions.Core.Tests
         [Fact]
         public void AtThatPoint_TheOrbitSnapMovesLessThanTheRingDoes()
         {
-            WorldModel w = GasGiantWorld(CauldronRing());
+            WorldModel w = UnlandableGasGiantWorld(CauldronRing());
             var pos = new Vec3(JustInsideOrbitBandR, 30, 0);
 
             // No feature: the orbit snap is the only authority, so this is its move alone.
-            WorldModel bare = GasGiantWorld();
+            WorldModel bare = UnlandableGasGiantWorld();
             SpatialNode snapped = bare.Graph.Add(pos, 0.5, "N1");
             bare.ReclassifyNodes(true);
             double orbitMove = snapped.Position.DistanceTo(pos);
@@ -415,9 +425,9 @@ namespace Factions.Core.Tests
         [Fact]
         public void OutsideTheRingsClaim_TheOrbitSnapStillPlacesTheNode()
         {
-            WorldModel w = GasGiantWorld(CauldronRing());
+            WorldModel w = UnlandableGasGiantWorld(CauldronRing());
             // Over the pole, inside the ring's hole: the ring gives that up, so nothing competes,
-            // and far enough out that gravity still reads Orbit rather than Surface.
+            // and the body forbids landing, so the well there is Orbit.
             SpatialNode n = w.Graph.Add(new Vec3(100, 200, 0), 0.5, "N1");
 
             NodeReclassifyResult r = w.ReclassifyNodes(true);
@@ -447,7 +457,12 @@ namespace Factions.Core.Tests
         [Fact]
         public void ExpandFrom_KeepsANewNodeInsideTheRing()
         {
-            WorldModel w = GasGiantWorld(CauldronRing());
+            // Authored as the live ring is. Unauthored, the ring's points read the well's 15 km
+            // Surface floor and a candidate that fell through its hole onto the core scores the same.
+            WorldFeature authored = CauldronRing();
+            authored.Zone = NodeZone.Orbit;
+            authored.NodeSeparationKm = 30.0;
+            WorldModel w = GasGiantWorld(authored);
             SpatialNode from = w.Graph.Add(new Vec3(210, 0, 0), 0.5, "N1");
             from.OwnerFactionTag = "F";
 
@@ -477,7 +492,7 @@ namespace Factions.Core.Tests
             // The defect: Cauldron's well ends at 304.89 km, the ring spans 195-465 km, so the
             // boundary falls through the middle of band 4 -- one authored feature, two separation
             // floors, split by something that has nothing to do with the ring.
-            WorldModel w = GasGiantWorld(CauldronRing());
+            WorldModel w = UnlandableGasGiantWorld(CauldronRing());
 
             Assert.Equal(NodeZone.Orbit,     w.PlaceableZoneAt(new Vec3(300, 0, 0)));   // inside the well
             Assert.Equal(NodeZone.DeepSpace, w.PlaceableZoneAt(new Vec3(310, 0, 0)));   // outside it
@@ -607,9 +622,13 @@ namespace Factions.Core.Tests
         {
             WorldModel w = GasGiantWorld();
 
+            // The whole well is Surface, low in it and high.
             Assert.Equal(w.Tuning.NodeSeparationSurfaceKm,   w.SeparationAtKm(new Vec3(5, 0, 0)), 6);
-            Assert.Equal(w.Tuning.NodeSeparationOrbitKm,     w.SeparationAtKm(new Vec3(250, 0, 0)), 6);
+            Assert.Equal(w.Tuning.NodeSeparationSurfaceKm,   w.SeparationAtKm(new Vec3(250, 0, 0)), 6);
             Assert.Equal(w.Tuning.NodeSeparationDeepSpaceKm, w.SeparationAtKm(new Vec3(5000, 0, 0)), 6);
+            // Orbit without an authored region: a well nothing may land on.
+            Assert.Equal(w.Tuning.NodeSeparationOrbitKm,
+                         UnlandableGasGiantWorld().SeparationAtKm(new Vec3(250, 0, 0)), 6);
         }
 
         [Fact]
@@ -641,15 +660,17 @@ namespace Factions.Core.Tests
         }
 
         [Fact]
-        public void AnAuthoredBodySeparation_AppliesOnItsSurfaceOnly()
+        public void AnAuthoredBodySeparation_AppliesAcrossItsWellOnly()
         {
             var planets = new GasGiantCatalogue();
             planets.Record.NodeSeparationKm = 10.0;
             var w = new WorldModel(new SeededRandom(7)) { Tuning = ZoneTuning(), Planets = planets };
 
             Assert.Equal(10.0, w.SeparationAtKm(new Vec3(GasGiantCatalogue.SurfaceR, 0, 0)), 6);
-            // Off the ground it is not a surface question any more.
-            Assert.Equal(w.Tuning.NodeSeparationOrbitKm, w.SeparationAtKm(new Vec3(250, 0, 0)), 6);
+            // High in the well is still the body's: a node there is placed on its ground.
+            Assert.Equal(10.0, w.SeparationAtKm(new Vec3(250, 0, 0)), 6);
+            // Outside the well it is not a surface question any more.
+            Assert.Equal(w.Tuning.NodeSeparationDeepSpaceKm, w.SeparationAtKm(new Vec3(400, 0, 0)), 6);
         }
 
         [Fact]

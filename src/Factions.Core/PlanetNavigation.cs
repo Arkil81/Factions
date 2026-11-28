@@ -101,6 +101,42 @@ namespace Factions.Core
             return nearest;
         }
 
+        /// <summary>The body whose ground lies under <paramref name="posKm"/>: among the bodies whose
+        /// reach (the larger of <see cref="PlanetRecord.GravityRadius"/> and
+        /// <see cref="PlanetRecord.SurfaceRadius"/>) contains the point, the one with the least
+        /// altitude above its own surface radius. Null outside every body's reach.
+        /// <para>Reaches the whole gravity well, which SE's <c>GetClosestPlanet</c> does not: that
+        /// answers only inside a planet's voxel storage cube, 32.77 km from Tellus's centre along an
+        /// axis against a 48.79 km well.</para></summary>
+        public static PlanetRecord GroundBody(IPlanetCatalogue planets, Vec3 posKm)
+        {
+            if (planets == null) return null;
+            PlanetRecord best = null;
+            double bestAltitude = double.MaxValue;
+            foreach (PlanetRecord p in planets.Planets)
+            {
+                if (p == null) continue;
+                double reach = Math.Max(p.GravityRadius, p.SurfaceRadius);
+                if (reach <= 0) continue;
+                double dist = posKm.DistanceTo(p.Center);
+                if (dist > reach) continue;
+                double altitude = dist - p.SurfaceRadius;
+                if (altitude < bestAltitude) { best = p; bestAltitude = altitude; }
+            }
+            return best;
+        }
+
+        /// <summary>How far <paramref name="posKm"/> stands above the highest terrain of
+        /// <see cref="GroundBody"/>'s body (<see cref="PlanetRecord.MaximumRadius"/>), km. Zero when it
+        /// is at or below it, outside every body's reach, or when the host does not know that radius.
+        /// A point standing above every hill cannot be on the ground.</summary>
+        public static double HeightAboveTerrainKm(IPlanetCatalogue planets, Vec3 posKm)
+        {
+            PlanetRecord body = GroundBody(planets, posKm);
+            if (body == null || body.MaximumRadius <= 0) return 0;
+            return Math.Max(0.0, posKm.DistanceTo(body.Center) - body.MaximumRadius);
+        }
+
         /// <summary>The planet whose gravity well actually contains <paramref name="posKm"/> — the
         /// nearest one whose <see cref="PlanetRecord.GravityRadius"/> the point is inside — falling
         /// back to <see cref="NearestByCentre"/> when the point is outside every well.

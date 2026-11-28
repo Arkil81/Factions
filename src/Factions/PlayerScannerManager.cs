@@ -360,9 +360,18 @@ namespace Factions
             IList<ScannerContact> contacts = PlayerScanner.Resolve(
                 1, origin, range, _runtime.World.Graph.Nodes.Values, _runtime.GetScannerFleetCandidates(),
                 _runtime.World.Tuning, _runtime.World.PriceCatalogue, _runtime.World.Registry,
-                _runtime.SensorOcclusion);
+                _runtime.SensorOcclusion, Grids != null ? Grids() : null);
             // Graded cold and as nobody's faction: the tiers a stranger arriving here would see.
             PlayerScanner.Grade(contacts, null, null, tuning);
+            // Grid labels as a client would receive them: composed per tier on the server.
+            var gridLines = new List<string>();
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                if (contacts[i].Kind != ScannerContactKind.Grid) continue;
+                ScannerContact g = contacts[i];
+                ScannerGrids.Withhold(ref g, tuning);
+                if (gridLines.Count < ProbeGridLines) gridLines.Add(ScannerGrids.DescribeContact(g, origin));
+            }
             var tiers = new int[(int)IntelTier.Full + 1];
             foreach (ScannerContact contact in contacts) tiers[(int)contact.Tier]++;
             var counts = new Dictionary<ScannerContactKind, int>();
@@ -390,7 +399,18 @@ namespace Factions
                 + " moving=" + moving
                 + " fastest=" + fastest.ToString("0.00", CultureInfo.InvariantCulture) + "km/min"
                 + " tiers contact=" + tiers[(int)IntelTier.Contact] + " class=" + tiers[(int)IntelTier.Class]
-                + " identity=" + tiers[(int)IntelTier.Identity] + " armament=" + tiers[(int)IntelTier.Armament];
+                + " identity=" + tiers[(int)IntelTier.Identity] + " armament=" + tiers[(int)IntelTier.Armament]
+                + (gridLines.Count > 0 ? "\n  " + string.Join("\n  ", gridLines) : "");
+        }
+
+        private const int ProbeGridLines = 20;
+        private const int GridListLines = 40;
+
+        /// <summary><c>factions scanner grids [player]</c>: the grid candidates every scan on this
+        /// server resolves against, for picking a probe point.</summary>
+        public string DescribeGrids(bool playersOnly)
+        {
+            return ScannerGrids.DescribeCandidates(Grids != null ? Grids() : null, playersOnly, GridListLines);
         }
 
         public void Close()

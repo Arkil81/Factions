@@ -40,10 +40,29 @@ namespace Factions
         private readonly Dictionary<long, string> _ownerNameScratch = new Dictionary<long, string>();
         private readonly Dictionary<long, bool> _ownerOfflineScratch = new Dictionary<long, bool>();
 
-        /// <summary>Called from the owned-grid enumeration for every grid past the size floor.</summary>
-        private void CollectHull(MyCubeGrid grid)
+        /// <summary>Called from the owned-grid enumeration for every grid past the size floor. An
+        /// agent keeps only player-owned grids: the authority's scanner takes those from its report.</summary>
+        private void CollectHull(MyCubeGrid grid, bool playerOwned)
         {
-            if (_runtime != null) _hullScratch.Add(grid);
+            if (_runtime != null || (playerOwned && _nexusRole == NexusRole.Agent)) _hullScratch.Add(grid);
+        }
+
+        /// <summary>Authority: each agent's player-owned grid groups, for the scanner and the map.</summary>
+        private readonly NexusScannerGridBook _agentScannerGrids = new NexusScannerGridBook();
+        private readonly HashSet<long> _scannerGridIds = new HashSet<long>();
+
+        /// <summary>Agent: set by each sample, cleared when a report carries it.</summary>
+        private bool _agentScannerGridsSampled;
+
+        /// <summary>Agent: the grid groups sampled here, for the next report; null when nothing was
+        /// sampled since the last one.</summary>
+        private List<NexusScannerGrid> ReadAgentScannerGrids()
+        {
+            if (!_agentScannerGridsSampled) return null;
+            _agentScannerGridsSampled = false;
+            var list = new List<NexusScannerGrid>(_scannerGrids.Count);
+            for (int i = 0; i < _scannerGrids.Count; i++) list.Add(NexusScannerGrid.From(_scannerGrids[i]));
+            return list;
         }
 
         /// <summary>Groups the grids the last enumeration collected. Runs on the sampler's throttle.</summary>
@@ -108,7 +127,7 @@ namespace Factions
         private void BuildScannerGrids()
         {
             _scannerGrids.Clear();
-            if (_runtime == null || MySession.Static == null) return;
+            if (MySession.Static == null || (_runtime == null && _nexusRole != NexusRole.Agent)) return;
             _ownerTagScratch.Clear();
             _ownerNameScratch.Clear();
             _ownerOfflineScratch.Clear();
@@ -146,6 +165,27 @@ namespace Factions
                     Name = lead.DisplayName,
                     WeaponDps = dps,
                 });
+            }
+            if (_runtime != null) AppendAgentScannerGrids();
+        }
+
+        /// <summary>Authority: the player-owned grids on every agent's shard, so a player is scanned
+        /// against the whole cluster and not only against the grids standing on this server. Owner
+        /// tag, name and offline are judged here where this server's tables know the owner; the
+        /// agent's own tag and name stand in where they do not.</summary>
+        private void AppendAgentScannerGrids()
+        {
+            _scannerGridIds.Clear();
+            for (int i = 0; i < _scannerGrids.Count; i++) _scannerGridIds.Add(_scannerGrids[i].EntityId);
+            int local = _scannerGrids.Count;
+            _agentScannerGrids.AppendFresh(_scannerGrids, DateTime.UtcNow, AgentContactsMaxAge, _scannerGridIds);
+            for (int i = local; i < _scannerGrids.Count; i++)
+            {
+                ScannerGridCandidate g = _scannerGrids[i];
+                g.OwnerTag = OwnerTagOf(g.OwnerIdentityId) ?? g.OwnerTag;
+                g.OwnerName = OwnerNameOf(g.OwnerIdentityId) ?? g.OwnerName;
+                g.OwnerOffline = OwnerOfflineOf(g.OwnerIdentityId);
+                _scannerGrids[i] = g;
             }
         }
 

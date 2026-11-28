@@ -106,6 +106,29 @@ namespace Factions.Core
         /// <see cref="WorldFeature.SpaceRespawn"/>.</summary>
         public bool SpaceRespawn;
 
+        /// <summary>See <see cref="WorldFeature.GivesUpHole"/>.</summary>
+        public bool GivesUpHole;
+
+        /// <summary>Greater than zero for a planet's orbit band (<see cref="RecipeOrbitRegion"/>):
+        /// the emitter sets the inner radius to the anchor's live gravity radius and the outer to that
+        /// plus this. The planned radii stay zero until then, because no gravity radius exists before
+        /// the body does.</summary>
+        public double OrbitRegionWidthKm;
+
+        /// <summary>The radii to write for this feature, given its anchor's live gravity radius.
+        /// False for an orbit band whose body has none: written at radius 0 it would claim the
+        /// planet's whole well. Any other feature returns its planned radii unchanged.</summary>
+        public bool TryResolveRadii(double gravityRadiusKm, out double innerKm, out double outerKm)
+        {
+            innerKm = InnerRadiusKm;
+            outerKm = OuterRadiusKm;
+            if (OrbitRegionWidthKm <= 0) return true;
+            if (gravityRadiusKm <= 0) return false;
+            innerKm = gravityRadiusKm;
+            outerKm = gravityRadiusKm + OrbitRegionWidthKm;
+            return true;
+        }
+
         public List<FeatureBand> Bands = new List<FeatureBand>();
 
         /// <summary>Composition. Null is no ore opinion — the region governs placement only and the
