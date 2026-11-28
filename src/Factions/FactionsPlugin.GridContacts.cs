@@ -31,10 +31,15 @@ namespace Factions
         private readonly List<MyCubeGrid> _hullScratch = new List<MyCubeGrid>();
         private readonly HashSet<long> _hullGrouped = new HashSet<long>();
         private readonly List<IMyCubeGrid> _groupScratch = new List<IMyCubeGrid>();
-        /// <summary>Whether a grid is a node's station, per grid id. Asked once per grid: the answer
-        /// walks every SE faction's stations.</summary>
+        /// <summary>Whether a grid is a node's station, per grid id. A yes is kept for the grid's
+        /// life; a no is asked again every <see cref="StationVerdictRetrySeconds"/>, because a station
+        /// grid exists before the materialiser records it, and a sample in that gap would otherwise
+        /// list the station as a player grid for good. The answer walks every SE faction's stations.</summary>
         private Dictionary<long, bool> _stationVerdict = new Dictionary<long, bool>();
         private Dictionary<long, bool> _stationVerdictNext = new Dictionary<long, bool>();
+        private const double StationVerdictRetrySeconds = 30.0;
+        private DateTime _stationVerdictRetriedAt;
+        private bool _stationVerdictRetry;
         private readonly List<ScannerGridCandidate> _scannerGrids = new List<ScannerGridCandidate>();
         private readonly Dictionary<long, string> _ownerTagScratch = new Dictionary<long, string>();
         private readonly Dictionary<long, string> _ownerNameScratch = new Dictionary<long, string>();
@@ -71,6 +76,9 @@ namespace Factions
             _hullGroups.Clear();
             _hullGrouped.Clear();
             _stationVerdictNext.Clear();
+            DateTime now = DateTime.UtcNow;
+            _stationVerdictRetry = (now - _stationVerdictRetriedAt).TotalSeconds >= StationVerdictRetrySeconds;
+            if (_stationVerdictRetry) _stationVerdictRetriedAt = now;
             for (int i = 0; i < _hullScratch.Count; i++)
             {
                 MyCubeGrid grid = _hullScratch[i];
@@ -108,11 +116,17 @@ namespace Factions
             _stationVerdictNext = swap;
         }
 
+        /// <summary>Whether a grid is a node's station, which the scanner leaves to the node's own
+        /// marker. An agent has no runtime: its stations are the ones its hands stand, so a station
+        /// a player founded on an agent's shard is not reported to the authority as a player grid.</summary>
         private bool IsStationVerdict(long gridId)
         {
             bool station;
-            if (!_stationVerdict.TryGetValue(gridId, out station))
-                station = _runtime != null && _runtime.IsStationGrid(gridId);
+            if (!_stationVerdict.TryGetValue(gridId, out station) || (!station && _stationVerdictRetry))
+                station = _runtime != null
+                    ? _runtime.IsStationGrid(gridId)
+                    : _agentHands != null && _agentHands.Stations != null
+                      && _agentHands.Stations.NodeIdForStationGrid(gridId) != null;
             _stationVerdictNext[gridId] = station;
             return station;
         }

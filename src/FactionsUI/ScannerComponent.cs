@@ -241,8 +241,21 @@ public class ScannerComponent : MySessionComponentBase
             }
 
             if (diagnose) Bump(drawn, c.Kind);
+            Vector2 normalized;
+            bool behind;
+            if (Projection.Project(world, ref view, ref projection, out normalized, out behind)
+                && !behind && !IsOffScreen(normalized))
+            {
+                _placed.Add(new Placed
+                {
+                    Key = pair.Key, Contact = c, World = world, Distance = distance, Alpha = alpha,
+                    Normalized = normalized,
+                });
+                continue;
+            }
             DrawContact(pair.Key, c, world, distance, alpha, ref view, ref projection, iconSize, now, gpsTexts);
         }
+        DrawPlaced(cameraPos, ref view, ref projection, iconSize, now, gpsTexts);
 
         if (diagnose)
         {
@@ -268,9 +281,7 @@ public class ScannerComponent : MySessionComponentBase
         Color colour = Palette.RelationColour(c.Relation);
         colour.A = (byte)(alpha * 255f);
 
-        bool offScreen = behind
-            || normalized.X < EdgeMargin || normalized.X > 1f - EdgeMargin
-            || normalized.Y < EdgeMargin || normalized.Y > 1f - EdgeMargin;
+        bool offScreen = behind || IsOffScreen(normalized);
 
         float rotation = 0f;
         if (offScreen)
@@ -319,13 +330,7 @@ public class ScannerComponent : MySessionComponentBase
 
         if (string.IsNullOrEmpty(c.Label)) return;
 
-        // A grid's label is a sentence (owner, class, blocks, armament); without Alt the marker
-        // keeps only the owner's tag, as a fleet keeps only its phrase.
-        string text = c.Kind == FactionsWire.ContactKindGrid && gpsTexts == null
-            ? ScannerNames.GridOwnerTag(c.Label)
-            : WithoutClassWord(c.Kind, c.Label);
-        if (gpsTexts != null && ShowName(c.DisplayName, gpsTexts))
-            text = text.Length > 0 ? c.DisplayName + PhraseSeparator + text : c.DisplayName;
+        string text = LabelText(c, gpsTexts);
         var labelColour = new Color(colour, alpha);
         MyGuiManager.DrawString("Blue",
             text.Length > 0 ? text + "  " + FormatDistance(distance) : FormatDistance(distance),
@@ -334,6 +339,165 @@ public class ScannerComponent : MySessionComponentBase
             LabelScale, labelColour,
             MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_BOTTOM,
             useFullClientArea: true, maxTextWidth: float.PositiveInfinity, ignoreBounds: true);
+    }
+
+    /// <summary>A marker's text before its distance. A grid's label is a sentence (owner, class,
+    /// blocks, armament); without Alt the marker keeps only the owner's tag, as a fleet keeps only
+    /// its phrase. With Alt the name goes in front.</summary>
+    private static string LabelText(Contact c, List<string> gpsTexts)
+    {
+        if (string.IsNullOrEmpty(c.Label)) return "";
+        string text = c.Kind == FactionsWire.ContactKindGrid && gpsTexts == null
+            ? ScannerNames.GridOwnerTag(c.Label)
+            : WithoutClassWord(c.Kind, c.Label);
+        if (gpsTexts != null && ShowName(c.DisplayName, gpsTexts))
+            text = text.Length > 0 ? c.DisplayName + PhraseSeparator + text : c.DisplayName;
+        return text;
+    }
+
+    private static bool IsOffScreen(Vector2 normalized)
+    {
+        return normalized.X < EdgeMargin || normalized.X > 1f - EdgeMargin
+            || normalized.Y < EdgeMargin || normalized.Y > 1f - EdgeMargin;
+    }
+
+    /// <summary>An on-screen contact, projected, waiting to be bundled.</summary>
+    private struct Placed
+    {
+        public string Key;
+        public Contact Contact;
+        public Vector3D World;
+        public double Distance;
+        public float Alpha;
+        public Vector2 Normalized;
+    }
+
+    private readonly List<Placed> _placed = new List<Placed>();
+    private readonly List<Placed> _bundle = new List<Placed>();
+
+    /// <summary>Contacts within SE's cluster angle of each other draw as one bundle.</summary>
+    private const float BundleIconScale = 0.75f;      // SE draws a group's icons at 0.75
+    private const int BundleGlyphIcons = 4;           // SE's group shows at most four
+    private const int BundleListRows = 8;
+
+    /// <summary>
+    /// Draws this frame's on-screen contacts, bundling the ones close together the way SE's HUD
+    /// bundles its own markers (<see cref="HudClusters"/>): a single contact draws as before; a
+    /// bundle draws as up to four small icons in a square, with its count and its nearest
+    /// distance. Holding Alt opens a bundle into a list, one row per contact with the text and
+    /// distance that contact would show on its own. SE opens a group when the crosshair is on it;
+    /// here Alt does, the gesture that already means "more detail" on this HUD.
+    ///
+    /// <para>Hostile contacts sort first, then nearer ones, so a bundle's seed and its first icons
+    /// are the ones that matter most. A station whose traffic control is speaking is never
+    /// bundled: its ring is drawn on its own icon.</para>
+    /// </summary>
+    private void DrawPlaced(Vector3D cameraPos, ref MatrixD view, ref MatrixD projection, Vector2 iconSize,
+                            double now, List<string> gpsTexts)
+    {
+        if (_placed.Count == 0) return;
+        _placed.Sort((a, b) =>
+        {
+            bool ha = a.Contact.Relation == 3, hb = b.Contact.Relation == 3;
+            if (ha != hb) return ha ? -1 : 1;
+            return a.Distance.CompareTo(b.Distance);
+        });
+        int n = _placed.Count;
+        var xyz = new double[3 * n];
+        var clusters = new bool[n];
+        for (int i = 0; i < n; i++)
+        {
+            Placed p = _placed[i];
+            xyz[3 * i] = p.World.X; xyz[3 * i + 1] = p.World.Y; xyz[3 * i + 2] = p.World.Z;
+            bool speaking;
+            clusters[i] = !(p.Key.StartsWith(NodeKeyPrefix, StringComparison.Ordinal)
+                            && AtcComponent.TrySpeaking(p.Key.Substring(NodeKeyPrefix.Length), out speaking));
+        }
+        int[] seedOf = HudClusters.Seeds(xyz, clusters, cameraPos.X, cameraPos.Y, cameraPos.Z,
+                                         HudClusters.ClusterAngleDeg);
+        for (int i = 0; i < n; i++)
+        {
+            if (seedOf[i] != i) continue;
+            _bundle.Clear();
+            for (int j = i; j < n; j++) if (seedOf[j] == i) _bundle.Add(_placed[j]);
+            if (_bundle.Count == 1)
+            {
+                Placed p = _bundle[0];
+                DrawContact(p.Key, p.Contact, p.World, p.Distance, p.Alpha, ref view, ref projection,
+                            iconSize, now, gpsTexts);
+            }
+            else DrawBundle(_bundle, iconSize, gpsTexts);
+        }
+        _placed.Clear();
+        _bundle.Clear();
+    }
+
+    private void DrawBundle(List<Placed> members, Vector2 iconSize, List<string> gpsTexts)
+    {
+        Vector2 anchor = Vector2.Zero;
+        float alpha = 0f;
+        double nearest = double.MaxValue;
+        for (int i = 0; i < members.Count; i++)
+        {
+            anchor += members[i].Normalized;
+            alpha = Math.Max(alpha, members[i].Alpha);
+            nearest = Math.Min(nearest, members[i].Distance);
+        }
+        anchor /= members.Count;
+        Vector2 mini = iconSize * BundleIconScale;
+        Color lead = Palette.RelationColour(members[0].Contact.Relation);
+
+        if (gpsTexts == null)
+        {
+            int icons = Math.Min(BundleGlyphIcons, members.Count);
+            for (int k = 0; k < icons; k++)
+            {
+                // Two by two, filled left to right and top to bottom; three leaves the corner empty.
+                var offset = new Vector2((k % 2 == 0 ? -0.5f : 0.5f) * mini.X, (k < 2 ? -0.5f : 0.5f) * mini.Y);
+                DrawMini(members[k], anchor + offset, mini);
+            }
+            MyGuiManager.DrawString("Blue",
+                members.Count + " contacts  " + FormatDistance(nearest),
+                new Vector2(anchor.X, anchor.Y - mini.Y - LabelGap),
+                LabelScale, new Color(lead, alpha),
+                MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_BOTTOM,
+                useFullClientArea: true, maxTextWidth: float.PositiveInfinity, ignoreBounds: true);
+            return;
+        }
+
+        // Alt: a list, one row per contact, below and to the right of the bundle's point.
+        float row = Math.Max(mini.Y, MyGuiManager.MeasureString("Blue", "Xg", LabelScale).Y) * 1.1f;
+        int rows = members.Count > BundleListRows ? BundleListRows - 1 : members.Count;
+        float y = anchor.Y;
+        for (int k = 0; k < rows; k++)
+        {
+            Placed m = members[k];
+            DrawMini(m, new Vector2(anchor.X, y), mini);
+            string text = LabelText(m.Contact, gpsTexts);
+            MyGuiManager.DrawString("Blue",
+                text.Length > 0 ? text + "  " + FormatDistance(m.Distance) : FormatDistance(m.Distance),
+                new Vector2(anchor.X + mini.X, y),
+                LabelScale, new Color(Palette.RelationColour(m.Contact.Relation), m.Alpha),
+                MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                useFullClientArea: true, maxTextWidth: float.PositiveInfinity, ignoreBounds: true);
+            y += row;
+        }
+        if (rows < members.Count)
+            MyGuiManager.DrawString("Blue", "+" + (members.Count - rows) + " more",
+                new Vector2(anchor.X + mini.X, y),
+                LabelScale, new Color(lead, alpha),
+                MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER,
+                useFullClientArea: true, maxTextWidth: float.PositiveInfinity, ignoreBounds: true);
+    }
+
+    private static void DrawMini(Placed m, Vector2 at, Vector2 size)
+    {
+        Color colour = Palette.RelationColour(m.Contact.Relation);
+        colour.A = (byte)(m.Alpha * 255f);
+        MyGuiManager.DrawSpriteBatch(ContactTexture(m.Contact), at, size, colour,
+            MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_CENTER,
+            useFullClientArea: true, waitTillLoaded: false, maskTexture: null,
+            rotation: 0f, rotSpeed: 0f, ignoreBounds: true);
     }
 
     /// <summary>The text SE's HUD writes beside each of the local player's GPSes that is shown on
